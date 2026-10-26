@@ -1,0 +1,17 @@
+# Local dependencies and generated builds
+/node_modules/
+/dist/
+
+# Local test evidence and generated reports
+/artifacts/
+/playwright-report/
+/test-results/
+/coverage/
+/.vite/
+/.cache/
+*.log
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
