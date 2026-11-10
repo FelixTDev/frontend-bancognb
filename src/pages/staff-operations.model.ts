@@ -3,7 +3,8 @@ import type { PublicUser, Ticket, TicketStatus } from "../shared/types/domain";
 export type KanbanRole = "ASESOR" | "SUPERVISOR";
 export type KanbanMoveAction =
   | { readonly kind: "status"; readonly targetStatus: TicketStatus; readonly requiresReason: boolean }
-  | { readonly kind: "assign"; readonly targetStatus: "ASIGNADO" }
+  | { readonly kind: "assign"; readonly targetStatus: TicketStatus }
+  | { readonly kind: "take"; readonly targetStatus: "ASIGNADO" }
   | { readonly kind: "release"; readonly targetStatus: "NUEVO" };
 export type KanbanMoveDecision =
   | { readonly allowed: true; readonly action: KanbanMoveAction }
@@ -12,11 +13,16 @@ export type KanbanMoveDecision =
 export const advisorKanbanColumns: readonly {
   readonly status: Extract<
     TicketStatus,
-    "ASIGNADO" | "EN_PROCESO" | "PENDIENTE_CLIENTE" | "RESUELTO"
+    "NUEVO" | "ASIGNADO" | "EN_PROCESO" | "PENDIENTE_CLIENTE" | "RESUELTO"
   >;
   readonly title: string;
   readonly emptyMessage: string;
 }[] = [
+  {
+    status: "NUEVO",
+    title: "Disponibles",
+    emptyMessage: "No hay tickets nuevos sin responsable.",
+  },
   {
     status: "ASIGNADO",
     title: "Por atender",
@@ -118,19 +124,38 @@ export function getKanbanMoveDecision(
     return { allowed: false, reason: "Los tickets finalizados se gestionan desde su detalle." };
   if (targetStatus === "CERRADO" || targetStatus === "CANCELADO")
     return { allowed: false, reason: "El cierre y la cancelación se gestionan desde el detalle." };
+  if (
+    role === "SUPERVISOR" &&
+    targetStatus === "ASIGNADO" &&
+    ticket.assigned_advisor_id !== null
+  ) {
+    return { allowed: true, action: { kind: "assign", targetStatus: ticket.status } };
+  }
   if (ticket.status === targetStatus)
     return { allowed: false, reason: "El ticket ya está en esa columna." };
-  if (role === "ASESOR" && ticket.assigned_advisor_id !== currentAdvisorId)
+  const advisorCanTake =
+    role === "ASESOR" &&
+    ticket.status === "NUEVO" &&
+    ticket.assigned_advisor_id === null &&
+    targetStatus === "ASIGNADO";
+  if (
+    role === "ASESOR" &&
+    ticket.assigned_advisor_id !== currentAdvisorId &&
+    !advisorCanTake
+  )
     return { allowed: false, reason: "Solo puedes mover tickets a tu cargo." };
   if (targetStatus === "NUEVO") {
     return ticket.assigned_advisor_id
       ? { allowed: true, action: { kind: "release", targetStatus: "NUEVO" } }
       : { allowed: false, reason: "El ticket ya está disponible." };
   }
-  if (ticket.status === "NUEVO" && targetStatus === "ASIGNADO")
-    return role === "SUPERVISOR" && ticket.assigned_advisor_id === null
+  if (ticket.status === "NUEVO" && targetStatus === "ASIGNADO") {
+    if (ticket.assigned_advisor_id !== null)
+      return { allowed: false, reason: "El ticket ya tiene responsable." };
+    return role === "SUPERVISOR"
       ? { allowed: true, action: { kind: "assign", targetStatus: "ASIGNADO" } }
-      : { allowed: false, reason: "Solo Supervisión puede asignar tickets nuevos." };
+      : { allowed: true, action: { kind: "take", targetStatus: "ASIGNADO" } };
+  }
   if (!allowedTicketTransitions[ticket.status].includes(targetStatus))
     return { allowed: false, reason: `No se permite mover de ${getTicketStatusLabel(ticket.status)} a ${getTicketStatusLabel(targetStatus)}.` };
   if (!ticket.assigned_advisor_id)

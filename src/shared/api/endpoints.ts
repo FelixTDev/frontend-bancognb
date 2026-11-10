@@ -55,13 +55,7 @@ export type ChatbotTicketDraftField = ApiSchemas["ChatbotTicketDraftField"];
 export type ChatbotConvertedTicketSummary =
   ApiSchemas["ChatbotConvertedTicketSummary"];
 export type LinkedConversation = ApiSchemas["LinkConversationResponse"];
-export interface SlaInfo {
-  readonly status: string;
-  readonly first_response_due_at?: string | null;
-  readonly resolution_due_at?: string | null;
-  readonly paused_at?: string | null;
-  readonly remaining_seconds?: number | null;
-}
+export type SlaInfo = ApiSchemas["TicketSlaRead"];
 export interface AuditItem {
   readonly action: string;
   readonly resource_type: string;
@@ -326,18 +320,18 @@ export const api = {
           body: { reason },
         }),
       ),
-    reopen: (id: string, reason?: string) =>
+    reopen: (id: string, reason: string, expectedVersion?: number) =>
       data<Ticket>(
         http.request(`/tickets/${id}/reopen`, {
           method: "POST",
-          body: { reason },
+          body: { reason, expected_version: expectedVersion },
         }),
       ),
-    cancel: (id: string, reason: string) =>
+    cancel: (id: string, reason: string, expectedVersion?: number) =>
       data<Ticket>(
         http.request(`/tickets/${id}/cancel`, {
           method: "POST",
-          body: { reason },
+          body: { reason, expected_version: expectedVersion },
         }),
       ),
     sla: (id: string) => data<SlaInfo>(http.request(`/tickets/${id}/sla`)),

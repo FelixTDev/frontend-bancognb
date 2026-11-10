@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Clock3,
   GripVertical,
+  History,
   LayoutGrid,
   ListFilter,
   RefreshCw,
@@ -19,11 +20,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/auth-context";
 import { api } from "../shared/api/endpoints";
 import { ApiError } from "../shared/api/http";
+import { useModalFocus } from "../shared/hooks/use-modal-focus";
 import {
   Button,
   PageIntro,
@@ -52,6 +54,7 @@ import {
   type KanbanMoveAction,
   type KanbanRole,
 } from "./staff-operations.model";
+import "./staff-operations.css";
 
 type TicketCollection = readonly Ticket[] | PageResult<Ticket>;
 type TicketQueryParams = Readonly<
@@ -71,8 +74,9 @@ function isPageResult(value: TicketCollection): value is PageResult<Ticket> {
 
 const supervisorStatuses = activeTicketStatuses;
 const historyStatuses = ["CERRADO", "CANCELADO"] as const;
-const historyStatusOptions = [...historyStatuses, "RESUELTO"] as const;
+const historyStatusOptions = historyStatuses;
 const pageSize = 20;
+const kanbanPageSize = 6;
 const priorityValues: readonly TicketPriority[] = [
   "URGENTE",
   "ALTA",
@@ -103,6 +107,13 @@ function formatDate(value: string): string {
         dateStyle: "short",
         timeStyle: "short",
       }).format(date);
+}
+
+function formatSlaDeadline(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Fecha no disponible"
+    : new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "short" }).format(date);
 }
 
 function toIsoStart(value: string): string | undefined {
@@ -189,6 +200,73 @@ interface KanbanMoveSubmission extends RequestedKanbanMove {
   readonly advisorId: string;
 }
 
+interface KanbanPointerGesture {
+  readonly pointerId: number;
+  readonly ticket: Ticket;
+  readonly startX: number;
+  readonly startY: number;
+  readonly startedAt: number;
+  readonly element: HTMLElement;
+  readonly pointerType: string;
+  lastY: number;
+  dragging: boolean;
+  scrolling: boolean;
+}
+
+const interactiveKanbanTarget =
+  "a, button, input, select, textarea, summary, [role='button'], [role='menuitem'], [contenteditable='true'], [data-no-kanban-drag]";
+
+function isKanbanInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(interactiveKanbanTarget));
+}
+
+function getKanbanDropStatusAt(
+  document: Document,
+  x: number,
+  y: number,
+): TicketStatus | null {
+  const element = document.elementFromPoint(x, y);
+  const target = element?.closest<HTMLElement>("[data-kanban-drop-status]");
+  const status = target?.dataset.kanbanDropStatus;
+  return status && activeTicketStatuses.includes(status as (typeof activeTicketStatuses)[number])
+    ? status as TicketStatus
+    : null;
+}
+
+function scrollKanbanPage(element: HTMLElement, deltaY: number): void {
+  const document = element.ownerDocument;
+  let candidate = element.parentElement;
+  while (candidate && candidate !== document.body && candidate !== document.documentElement) {
+    const style = document.defaultView?.getComputedStyle(candidate);
+    if (
+      style &&
+      /(auto|scroll)/.test(style.overflowY) &&
+      candidate.scrollHeight > candidate.clientHeight
+    ) {
+      candidate.scrollTop -= deltaY;
+      return;
+    }
+    candidate = candidate.parentElement;
+  }
+  document.defaultView?.scrollBy(0, -deltaY);
+}
+
+function getKanbanDropState(
+  ticket: Ticket | null,
+  status: TicketStatus,
+  role: KanbanRole,
+  currentAdvisorId: string,
+  targetStatus: TicketStatus | null,
+): "valid" | "target" | undefined {
+  if (
+    !ticket ||
+    ticket.status === status ||
+    !getKanbanMoveDecision(ticket, status, role, currentAdvisorId).allowed
+  )
+    return undefined;
+  return targetStatus === status ? "target" : "valid";
+}
+
 function useKanbanMovement(
   role: KanbanRole,
   advisors: readonly PublicUser[],
@@ -198,12 +276,15 @@ function useKanbanMovement(
   const queryClient = useQueryClient();
   const [selectedMove, setSelectedMove] = useState<RequestedKanbanMove | null>(null);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
+  const [dragTargetStatus, setDragTargetStatus] = useState<TicketStatus | null>(null);
   const [reason, setReason] = useState("");
   const [advisorId, setAdvisorId] = useState("");
   const [feedback, setFeedback] = useState("");
   const [failedMove, setFailedMove] = useState<KanbanMoveSubmission | null>(null);
   const [failedError, setFailedError] = useState("");
   const feedbackTimer = useRef<number | null>(null);
+  const pointerGesture = useRef<KanbanPointerGesture | null>(null);
+  const suppressCardClickUntil = useRef(0);
   const announce = (message: string, clearAfter?: number) => {
     if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
     setFeedback(message);
@@ -217,6 +298,7 @@ function useKanbanMovement(
   const mutation = useMutation({
     mutationFn: ({ ticket, action, reason: moveReason, advisorId: selectedAdvisor }: KanbanMoveSubmission) => {
       if (action.kind === "assign") return api.tickets.assign(ticket.id, selectedAdvisor, ticket.version);
+      if (action.kind === "take") return api.tickets.take(ticket.id, ticket.version);
       if (action.kind === "release") return api.tickets.release(ticket.id, moveReason, ticket.version);
       return api.tickets.changeStatus(ticket.id, action.targetStatus, moveReason || undefined, ticket.version);
     },
@@ -238,7 +320,11 @@ function useKanbanMovement(
         await invalidateTicketLists(queryClient);
         return;
       }
-      if (variables.action.kind === "status" && !variables.action.requiresReason) {
+      const handledByDialog =
+        variables.action.kind === "assign" ||
+        variables.action.kind === "release" ||
+        (variables.action.kind === "status" && variables.action.requiresReason);
+      if (!handledByDialog) {
         setFailedMove(variables);
         setFailedError(errorMessage(error));
       }
@@ -258,33 +344,112 @@ function useKanbanMovement(
     setAdvisorId("");
     setSelectedMove(null);
     setFeedback("");
+    if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = null;
     const move = { ticket, action: decision.action };
-    if (decision.action.kind === "status" && !decision.action.requiresReason) {
+    if (decision.action.kind === "take" || (decision.action.kind === "status" && !decision.action.requiresReason)) {
       mutation.mutate({ ...move, reason: "", advisorId: "" });
       return;
     }
     setSelectedMove(move);
   };
-  const onDragStart = (ticket: Ticket, event: React.DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", ticket.id);
-    setDraggedTicket(ticket);
-    setFeedback("");
+  const onPointerDown = (ticket: Ticket, event: React.PointerEvent<HTMLElement>) => {
+    if (mutation.isPending || !event.isPrimary || isKanbanInteractiveTarget(event.target)) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    pointerGesture.current = {
+      pointerId: event.pointerId,
+      ticket,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedAt: Date.now(),
+      element: event.currentTarget,
+      pointerType: event.pointerType,
+      lastY: event.clientY,
+      dragging: false,
+      scrolling: false,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      pointerGesture.current = null;
+    }
   };
-  const onDragOver = (status: TicketStatus, event: React.DragEvent<HTMLElement>) => {
-    if (!draggedTicket) return;
+  const onPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const gesture = pointerGesture.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    const distance = Math.hypot(deltaX, deltaY);
+    const threshold = gesture.pointerType === "touch" ? 12 : 6;
+
+    if (gesture.scrolling) {
+      event.preventDefault();
+      scrollKanbanPage(gesture.element, event.clientY - gesture.lastY);
+      gesture.lastY = event.clientY;
+      suppressCardClickUntil.current = Date.now() + 500;
+      return;
+    }
+
+    if (!gesture.dragging) {
+      if (distance < threshold) return;
+      if (gesture.pointerType === "touch") {
+        const horizontalIntent = Math.abs(deltaX) > Math.abs(deltaY) * 1.15;
+        const deliberateLongPress = Date.now() - gesture.startedAt >= 350;
+        if (!horizontalIntent && !deliberateLongPress) {
+          gesture.scrolling = true;
+          event.preventDefault();
+          scrollKanbanPage(gesture.element, event.clientY - gesture.lastY);
+          gesture.lastY = event.clientY;
+          suppressCardClickUntil.current = Date.now() + 500;
+          return;
+        }
+      }
+      gesture.dragging = true;
+      suppressCardClickUntil.current = Date.now() + 650;
+      if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = null;
+      setDraggedTicket(gesture.ticket);
+      setFeedback("");
+    }
+
     event.preventDefault();
-    const decision = getKanbanMoveDecision(draggedTicket, status, role, currentAdvisorId);
-    // Let an invalid drop reach the column so it can announce why it was rejected.
-    event.dataTransfer.dropEffect = "move";
-    if (!decision.allowed) setFeedback(decision.reason);
-    else setFeedback("");
+    const status = getKanbanDropStatusAt(gesture.element.ownerDocument, event.clientX, event.clientY);
+    const decision = status
+      ? status === gesture.ticket.status
+        ? { allowed: false as const, reason: "El ticket ya está en esa columna." }
+        : getKanbanMoveDecision(gesture.ticket, status, role, currentAdvisorId)
+      : null;
+    const nextTarget = decision?.allowed ? status : null;
+    setDragTargetStatus((previous) => previous === nextTarget ? previous : nextTarget);
+    if (decision && !decision.allowed) setFeedback(decision.reason);
+    else setFeedback(nextTarget ? `Destino: ${getTicketStatusLabel(nextTarget)}` : "");
   };
-  const onDrop = (status: TicketStatus, event: React.DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    if (draggedTicket) requestMove(draggedTicket, status);
+  const finishPointerGesture = (event: React.PointerEvent<HTMLElement>, cancelled: boolean) => {
+    const gesture = pointerGesture.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    pointerGesture.current = null;
+    if (gesture.dragging && !cancelled) {
+      const status = getKanbanDropStatusAt(gesture.element.ownerDocument, event.clientX, event.clientY);
+      if (status === gesture.ticket.status) announce("El ticket ya está en esa columna.", 5000);
+      else if (status) requestMove(gesture.ticket, status);
+      else setFeedback("");
+      suppressCardClickUntil.current = Date.now() + 650;
+    } else if (cancelled && gesture.dragging) {
+      setFeedback("");
+      suppressCardClickUntil.current = Date.now() + 650;
+    }
     setDraggedTicket(null);
+    setDragTargetStatus(null);
+    try {
+      if (gesture.element.hasPointerCapture(gesture.pointerId))
+        gesture.element.releasePointerCapture(gesture.pointerId);
+    } catch {
+      // A pointer cancel can release capture before this handler runs.
+    }
   };
+  const onPointerUp = (event: React.PointerEvent<HTMLElement>) => finishPointerGesture(event, false);
+  const onPointerCancel = (event: React.PointerEvent<HTMLElement>) => finishPointerGesture(event, true);
+  const shouldIgnoreCardClick = () => Date.now() < suppressCardClickUntil.current;
 
   const dialog = selectedMove ? (
     <KanbanMoveDialog
@@ -310,7 +475,10 @@ function useKanbanMovement(
   };
 
   return {
+    role,
+    currentAdvisorId,
     draggedTicket,
+    dragTargetStatus,
     feedback,
     dialog,
     isPending: mutation.isPending,
@@ -319,10 +487,11 @@ function useKanbanMovement(
     failedError,
     retryFailedMove,
     requestMove,
-    onDragStart,
-    onDragOver,
-    onDrop,
-    onDragEnd: () => setDraggedTicket(null),
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel,
+    shouldIgnoreCardClick,
   };
 }
 
@@ -349,14 +518,28 @@ function KanbanMoveDialog({
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }) {
+  const dialogRef = useModalFocus<HTMLElement>(() => { if (!isPending) onCancel(); });
   const needsReason = move.action.kind === "release" || (move.action.kind === "status" && move.action.requiresReason);
   const needsAdvisor = move.action.kind === "assign";
+  const isReassignment = needsAdvisor && Boolean(move.ticket.assigned_advisor_id);
   const titleId = `kanban-move-title-${move.ticket.id}`;
   const actionDescription = move.action.kind === "assign"
-    ? "Selecciona un asesor activo. El ticket se asignará usando la operación de asignación del servicio."
+    ? isReassignment
+      ? "Selecciona el nuevo responsable. El estado actual del ticket se conservará."
+      : "Selecciona un asesor activo para asignar el ticket a Por atender."
     : move.action.kind === "release"
-      ? "Al liberar, el estado vuelve a Disponible y se elimina el responsable. El historial y el SLA se conservan."
+      ? "Al liberar, el ticket vuelve a Disponibles y se elimina el responsable. El historial y el SLA se conservan."
       : `El ticket pasará a ${getTicketStatusLabel(move.action.targetStatus)}.`;
+  const title = needsAdvisor
+    ? isReassignment ? "Reasignar responsable" : "Asignar ticket"
+    : move.action.kind === "release" ? "Liberar ticket" : "Confirmar movimiento";
+  const confirmLabel = isPending
+    ? "Guardando…"
+    : error
+      ? "Reintentar"
+      : needsAdvisor
+        ? isReassignment ? "Reasignar" : "Asignar"
+        : move.action.kind === "release" ? "Liberar ticket" : "Confirmar";
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isPending || (needsAdvisor && !advisorId) || (needsReason && !reason.trim())) return;
@@ -366,22 +549,23 @@ function KanbanMoveDialog({
   return (
     <div className="staff-move-backdrop">
       <section
+        ref={dialogRef}
         className="staff-move-dialog"
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
-        onKeyDown={(event) => { if (event.key === "Escape" && !isPending) onCancel(); }}
       >
         <form onSubmit={handleSubmit}>
-          <h2 id={titleId}>Confirmar movimiento</h2>
+          <h2 id={titleId}>{title}</h2>
           <p><strong>{move.ticket.tracking_code}</strong>: {actionDescription}</p>
           {needsAdvisor ? <label><span>Asesor activo</span><select autoFocus required value={advisorId} onChange={(event) => onAdvisorChange(event.target.value)}><option value="">Selecciona un asesor</option>{advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.full_name}</option>)}</select></label> : null}
-          {needsReason ? <label><span>{move.action.kind === "release" ? "Motivo de liberación" : "Motivo de reanudación"}</span><textarea autoFocus={!needsAdvisor} required maxLength={1000} value={reason} onChange={(event) => onReasonChange(event.target.value)} /></label> : null}
+          {needsReason ? <label><span>{move.action.kind === "release" ? "Motivo de liberación" : "Motivo de reapertura"}</span><textarea autoFocus={!needsAdvisor} required maxLength={1000} value={reason} onChange={(event) => onReasonChange(event.target.value)} /></label> : null}
           {error ? <p className="form-error" role="alert">{errorMessage(error)}</p> : null}
           <div className="staff-move-dialog__actions">
             <button className="button button--secondary" type="button" disabled={isPending} onClick={onCancel}>Cancelar</button>
             <button className="button" type="submit" disabled={isPending || (needsAdvisor && !advisorId) || (needsReason && !reason.trim())}>
-              {isPending ? "Guardando…" : error ? "Reintentar" : "Confirmar"}
+              {confirmLabel}
             </button>
           </div>
         </form>
@@ -396,48 +580,46 @@ function KanbanMovementControls({
   currentAdvisorId,
   isPending,
   onRequestMove,
-  onDragStart,
-  onDragEnd,
 }: {
   readonly ticket: Ticket;
   readonly role: KanbanRole;
   readonly currentAdvisorId: string;
   readonly isPending: boolean;
   readonly onRequestMove: (ticket: Ticket, status: TicketStatus) => void;
-  readonly onDragStart: (ticket: Ticket, event: React.DragEvent<HTMLButtonElement>) => void;
-  readonly onDragEnd: () => void;
 }) {
-  const [canDrag, setCanDrag] = useState(false);
-  useEffect(() => {
-    const media = window.matchMedia("(pointer: fine)");
-    const update = () => setCanDrag(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  const options = getKanbanMoveOptions(ticket, role, currentAdvisorId);
+  const options = [...getKanbanMoveOptions(ticket, role, currentAdvisorId)].sort((left, right) => {
+    const rank = (action: KanbanMoveAction) =>
+      action.kind === "status" ||
+      action.kind === "take" ||
+      (action.kind === "assign" && ticket.status === "NUEVO")
+        ? 0
+        : 1;
+    return rank(left.action) - rank(right.action);
+  });
   return (
     <div className="staff-ticket-card__movement">
       <label>
-        <span className="sr-only">Cambiar estado para {ticket.tracking_code}</span>
+        <span className="sr-only">Mover a… para {ticket.tracking_code}</span>
         <select value="" disabled={!options.length || isPending} onChange={(event) => {
           const status = event.target.value as TicketStatus;
           if (status) onRequestMove(ticket, status);
         }}>
-          <option value="">{options.length ? "Cambiar estado…" : "Sin movimientos disponibles"}</option>
-          {options.map(({ status, action }) => <option key={status} value={status}>{action.kind === "assign" ? "Asignar y mover a " : action.kind === "release" ? "Liberar a " : "Mover a "}{getTicketStatusLabel(status)}</option>)}
+          <option value="">{options.length ? "Mover a…" : "Sin movimientos disponibles"}</option>
+          {options.map(({ status, action }) => {
+            const label = action.kind === "take"
+              ? "Tomar ticket"
+              : action.kind === "assign"
+                ? ticket.assigned_advisor_id ? "Reasignar responsable" : "Asignar a Por atender"
+                : action.kind === "release"
+                  ? "Liberar a Disponibles"
+                  : `Mover a ${getTicketStatusLabel(status)}`;
+            return <option key={status} value={status}>{label}</option>;
+          })}
         </select>
       </label>
-      <button
-        className="staff-ticket-card__drag"
-        type="button"
-        draggable={canDrag && !isPending}
-        disabled={isPending}
-        aria-label={`Arrastrar ${ticket.tracking_code}`}
-        title={canDrag ? "Arrastrar a una columna válida" : "Usa Cambiar estado para mover este ticket"}
-        onDragStart={(event) => onDragStart(ticket, event)}
-        onDragEnd={onDragEnd}
-      ><GripVertical aria-hidden="true" /><span className="sr-only">Arrastrar tarjeta</span></button>
+      <span className="staff-ticket-card__drag-hint" aria-hidden="true" title="Arrastra desde cualquier espacio libre de la tarjeta">
+        <GripVertical />
+      </span>
     </div>
   );
 }
@@ -460,134 +642,156 @@ function KanbanMoveFailure({
   );
 }
 
+function StaffSectionTabs({
+  role,
+  active,
+}: {
+  readonly role: KanbanRole;
+  readonly active: "board" | "history";
+}) {
+  const prefix = role === "ASESOR" ? "/asesor" : "/supervisor";
+  return (
+    <nav className="staff-rework-nav" aria-label="Vistas de tickets">
+      <Link className={active === "board" ? "is-active" : ""} aria-current={active === "board" ? "page" : undefined} to={`${prefix}/${role === "ASESOR" ? "panel" : "cola"}`}>
+        <LayoutGrid aria-hidden="true" />Tablero
+      </Link>
+      <Link className={active === "history" ? "is-active" : ""} aria-current={active === "history" ? "page" : undefined} to={`${prefix}/historial`}>
+        <History aria-hidden="true" />Historial
+      </Link>
+    </nav>
+  );
+}
+
+function StaffStageTabs({
+  statuses,
+  titles,
+  selected,
+  counts,
+  onSelect,
+  movement,
+  role,
+  currentAdvisorId = "",
+}: {
+  readonly statuses: readonly TicketStatus[];
+  readonly titles?: Readonly<Record<string, string>>;
+  readonly selected: TicketStatus;
+  readonly counts: Partial<Record<TicketStatus, number>>;
+  readonly onSelect: (status: TicketStatus) => void;
+  readonly movement?: ReturnType<typeof useKanbanMovement>;
+  readonly role?: KanbanRole;
+  readonly currentAdvisorId?: string;
+}) {
+  return (
+    <div className="staff-rework-stage-tabs" role="tablist" aria-label="Etapas del tablero">
+      {statuses.map((status) => {
+        const dropState = movement && role
+          ? getKanbanDropState(movement.draggedTicket, status, role, currentAdvisorId, movement.dragTargetStatus)
+          : undefined;
+        return (
+          <button
+            id={`staff-stage-tab-${status}`}
+            key={status}
+            type="button"
+            role="tab"
+            aria-selected={selected === status}
+            aria-controls={`staff-stage-panel-${status}`}
+            data-kanban-drop-status={status}
+            data-drop-state={dropState}
+            onClick={() => onSelect(status)}
+          >
+            <span>{titles?.[status] ?? getTicketStatusLabel(status)}</span>
+            <b>{counts[status] ?? "…"}</b>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AdvisorDashboardPage() {
   const { session } = useAuth();
   const location = useLocation();
-  const locationState = location.state as
-    | { readonly ticketReleaseNotice?: unknown }
-    | null;
-  const [releaseNotice] = useState(() =>
-    typeof locationState?.ticketReleaseNotice === "string"
-      ? locationState.ticketReleaseNotice
-      : null,
-  );
-  const summary = useQuery({
-    queryKey: ["operations", "advisor", "summary"],
-    queryFn: () =>
-      api.tickets.operations({ queue: "assigned_to_me", page: 1, page_size: 1 }),
-  });
-  const soon = useQuery({
-    queryKey: ["operations", "advisor", "sla-soon"],
-    queryFn: () => api.tickets.operations({ queue: "sla_soon", page: 1, page_size: 1 }),
-  });
-  const overdue = useQuery({
-    queryKey: ["operations", "advisor", "sla-overdue"],
-    queryFn: () => api.tickets.operations({ queue: "sla_overdue", page: 1, page_size: 1 }),
-  });
-  const pending = useQuery({
-    queryKey: ["operations", "advisor", "pending-client"],
-    queryFn: () =>
-      api.tickets.operations({
-        queue: "assigned_to_me",
-        status: "PENDIENTE_CLIENTE",
-        page: 1,
-        page_size: 1,
-      }),
-  });
-  const slaSoon = useQuery({
-    queryKey: ["operations", "advisor", "sla-soon-list"],
-    queryFn: () => api.tickets.operations({ queue: "sla_soon", page: 1, page_size: 100 }),
-  });
-  const slaOverdue = useQuery({
-    queryKey: ["operations", "advisor", "sla-overdue-list"],
-    queryFn: () => api.tickets.operations({ queue: "sla_overdue", page: 1, page_size: 100 }),
-  });
-  const slaFlags = useMemo(
-    () => ({
-      overdue: new Set(ticketItems(slaOverdue.data).map((ticket) => ticket.id)),
-      soon: new Set(ticketItems(slaSoon.data).map((ticket) => ticket.id)),
-    }),
-    [slaOverdue.data, slaSoon.data],
-  );
-  const [mobileStatus, setMobileStatus] = useState<TicketStatus>("ASIGNADO");
+  const locationState = location.state as { readonly ticketReleaseNotice?: unknown } | null;
+  const releaseNotice = typeof locationState?.ticketReleaseNotice === "string" ? locationState.ticketReleaseNotice : null;
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
+  const [priority, setPriority] = useState<TicketPriority | "">("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [stageTotals, setStageTotals] = useState<Partial<Record<TicketStatus, number>>>({});
+  const [mobileStatus, setMobileStatus] = useState<TicketStatus>("NUEVO");
+  const reportStageTotal = useCallback((status: TicketStatus, total: number) => {
+    setStageTotals((previous) => previous[status] === total ? previous : { ...previous, [status]: total });
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchDraft.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
+  const filters: AssignmentFilters = { search, priority, from, to };
 
   return (
-    <>
-      <PageIntro
-        title="Panel de atención"
-        description="Tu trabajo asignado, ordenado por estado y urgencia operativa."
-        actions={
-          <Link className="button button--secondary" to="/asesor/bandeja">
-            <ListFilter aria-hidden="true" />
-            Abrir bandeja
-          </Link>
-        }
-      />
-      {releaseNotice ? (
-        <p className="form-success" role="status" aria-live="polite">
-          {releaseNotice}
-        </p>
-      ) : null}
-      <section className="dashboard-summary staff-summary" aria-label="Resumen de atención">
-        <article><span>Total asignados</span><strong>{summary.isError ? "—" : summary.data?.total ?? "—"}</strong><p>Tickets activos a tu cargo.</p></article>
-        <article><span>SLA próximo a vencer</span><strong>{soon.isError ? "—" : soon.data?.total ?? "—"}</strong><p>Revisa el tiempo disponible.</p></article>
-        <article><span>SLA vencido</span><strong>{overdue.isError ? "—" : overdue.data?.total ?? "—"}</strong><p>Requieren atención prioritaria.</p></article>
-        <article><span>Esperando al cliente</span><strong>{pending.isError ? "—" : pending.data?.total ?? "—"}</strong><p>Conservan el seguimiento activo.</p></article>
-      </section>
-      {(summary.isError || soon.isError || overdue.isError || pending.isError) ? (
-        <div className="form-notice" role="status">No fue posible cargar uno o más conteos. El Kanban conserva sus propios estados de carga y reintento.</div>
-      ) : null}
+    <div className="staff-rework-page">
+      <StaffSectionTabs role="ASESOR" active="board" />
+      <PageIntro title="Kanban de atención" description="Toma solicitudes disponibles y sigue las que están a tu cargo." actions={<Link className="button button--secondary" to="/asesor/bandeja"><ListFilter aria-hidden="true" />Bandeja completa</Link>} />
+      {releaseNotice ? <p className="form-success" role="status" aria-live="polite">{releaseNotice}</p> : null}
+      <FilterDrawer label="Buscar y filtrar tickets">
+        <div className="staff-filter-grid staff-rework-filters">
+          <div className="staff-filter-search">
+            <label className="staff-filter-search__label" htmlFor="advisor-kanban-search">Buscar solicitud</label>
+            <div className="search-field"><Search aria-hidden="true" /><input id="advisor-kanban-search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Código, asunto o cliente" autoComplete="off" /></div>
+          </div>
+          <label><span>Prioridad</span><select value={priority} onChange={(event) => setPriority(event.target.value as TicketPriority | "")}><option value="">Todas las prioridades</option>{priorityValues.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="staff-filter-date"><span>Creado desde</span><span className="staff-filter-date__control"><CalendarDays aria-hidden="true" /><input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></span></label>
+          <label className="staff-filter-date"><span>Creado hasta</span><span className="staff-filter-date__control"><CalendarDays aria-hidden="true" /><input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></span></label>
+        </div>
+      </FilterDrawer>
       <AdvisorKanban
         currentAdvisorId={session?.user.id ?? ""}
-        slaFlags={slaFlags}
+        filters={filters}
+        stageTotals={stageTotals}
+        reportStageTotal={reportStageTotal}
         mobileStatus={mobileStatus}
         onMobileStatusChange={setMobileStatus}
       />
-      <p className="staff-history-note">
-        Los tickets cerrados y cancelados se conservan en el <Link to="/asesor/historial">historial de atención</Link>.
-      </p>
-    </>
+    </div>
   );
 }
 
 function AdvisorKanban({
   currentAdvisorId,
-  slaFlags,
+  filters,
+  stageTotals,
+  reportStageTotal,
   mobileStatus,
   onMobileStatusChange,
 }: {
   readonly currentAdvisorId: string;
-  readonly slaFlags: { readonly overdue: ReadonlySet<string>; readonly soon: ReadonlySet<string> };
+  readonly filters: AssignmentFilters;
+  readonly stageTotals: Partial<Record<TicketStatus, number>>;
+  readonly reportStageTotal: (status: TicketStatus, total: number) => void;
   readonly mobileStatus: TicketStatus;
   readonly onMobileStatusChange: (status: TicketStatus) => void;
 }) {
   const movement = useKanbanMovement("ASESOR", [], currentAdvisorId, onMobileStatusChange);
   return (
-    <section className="content-section staff-board-section" aria-labelledby="advisor-board-title">
-      <div className="section-bar">
-        <div><h2 id="advisor-board-title">Mis tickets</h2><p>Los tickets sin responsable y los finalizados se consultan en otras vistas.</p></div>
-        <Link className="text-link" to="/asesor/bandeja">Ver todos en la bandeja <ArrowUpRight aria-hidden="true" /></Link>
+    <section className="content-section staff-board-section staff-rework-board" aria-labelledby="advisor-board-title">
+      <div className="section-bar staff-rework-board__heading">
+        <div><h2 id="advisor-board-title">Tickets por etapa</h2><p>Los totales corresponden al resultado completo de cada consulta.</p></div>
+        <Link className="text-link" to="/asesor/historial">Ver tickets finalizados <ArrowUpRight aria-hidden="true" /></Link>
       </div>
-      <div className="staff-mobile-tabs" role="tablist" aria-label="Estado del Kanban">
+      <StaffStageTabs
+        statuses={advisorKanbanColumns.map(({ status }) => status)}
+        titles={Object.fromEntries(advisorKanbanColumns.map(({ status, title }) => [status, title]))}
+        selected={mobileStatus}
+        counts={stageTotals}
+        onSelect={onMobileStatusChange}
+        movement={movement}
+        role="ASESOR"
+        currentAdvisorId={currentAdvisorId}
+      />
+      <div className="staff-kanban staff-kanban--advisor staff-kanban--redesign" data-mobile-status={mobileStatus}>
         {advisorKanbanColumns.map((column) => (
-          <button
-            key={column.status}
-            type="button"
-            role="tab"
-            aria-selected={mobileStatus === column.status}
-            onClick={() => onMobileStatusChange(column.status)}
-          >{column.title}</button>
-        ))}
-      </div>
-      <div className="staff-kanban staff-kanban--advisor" data-mobile-status={mobileStatus}>
-        {advisorKanbanColumns.map((column) => (
-          <AdvisorKanbanColumn
-            key={column.status}
-            column={column}
-            currentAdvisorId={currentAdvisorId}
-            slaFlags={slaFlags}
-            movement={movement}
-          />
+          <AdvisorKanbanColumn key={column.status} column={column} currentAdvisorId={currentAdvisorId} filters={filters} reportTotal={reportStageTotal} movement={movement} />
         ))}
       </div>
       {movement.feedback ? <p className="staff-kanban-feedback" role="status" aria-live="polite">{movement.feedback}</p> : null}
@@ -599,49 +803,56 @@ function AdvisorKanban({
 function AdvisorKanbanColumn({
   column,
   currentAdvisorId,
-  slaFlags,
+  filters,
+  reportTotal,
   movement,
 }: {
   readonly column: (typeof advisorKanbanColumns)[number];
   readonly currentAdvisorId: string;
-  readonly slaFlags: { readonly overdue: ReadonlySet<string>; readonly soon: ReadonlySet<string> };
+  readonly filters: AssignmentFilters;
+  readonly reportTotal: (status: TicketStatus, total: number) => void;
   readonly movement: ReturnType<typeof useKanbanMovement>;
 }) {
   const query = useInfiniteQuery({
-    queryKey: ["operations", "advisor-kanban", column.status],
+    queryKey: ["operations", "advisor-kanban", column.status, filters],
     initialPageParam: 1,
-    queryFn: ({ pageParam }) =>
-      api.tickets.operations({
-        queue: "assigned_to_me",
-        status: column.status,
-        page: pageParam,
-        page_size: pageSize,
-      }),
-    getNextPageParam: (lastPage) =>
-      lastPage.page < (lastPage.total_pages ?? 1) ? lastPage.page + 1 : undefined,
+    queryFn: ({ pageParam }) => api.tickets.operations({
+      queue: column.status === "NUEVO" ? "unassigned" : "assigned_to_me",
+      status: column.status,
+      priority: filters.priority || undefined,
+      search: filters.search || undefined,
+      created_from: toIsoStart(filters.from),
+      created_to: toIsoEnd(filters.to),
+      page: pageParam,
+      page_size: kanbanPageSize,
+    }),
+    getNextPageParam: (lastPage) => lastPage.page < (lastPage.total_pages ?? 1) ? lastPage.page + 1 : undefined,
   });
   const allItems = query.data?.pages.flatMap((page) => page.items) ?? [];
   const tickets = sortKanbanTickets(
-    allItems.filter((ticket) => ticket.assigned_advisor_id === currentAdvisorId),
-    slaFlags,
+    allItems.filter((ticket) => column.status === "NUEVO" ? ticket.assigned_advisor_id === null : ticket.assigned_advisor_id === currentAdvisorId),
+    { overdue: new Set(), soon: new Set() },
   );
-  const total = query.data?.pages[0]?.total ?? 0;
+  const firstPage = query.data?.pages[0];
+  const total = firstPage?.total ?? 0;
+  useEffect(() => {
+    if (firstPage) reportTotal(column.status, total);
+  }, [column.status, firstPage, reportTotal, total]);
 
   return (
     <section
-      className="staff-kanban__column"
+      className="staff-kanban__column staff-kanban__column--redesign"
+      id={`staff-stage-panel-${column.status}`}
+      role="tabpanel"
+      aria-labelledby={`staff-stage-tab-${column.status}`}
       data-status={column.status}
-      data-drop-state={movement.draggedTicket ? (getKanbanMoveDecision(movement.draggedTicket, column.status, "ASESOR", currentAdvisorId).allowed ? "valid" : "invalid") : undefined}
-      aria-labelledby={`advisor-column-${column.status}`}
-      onDragOver={(event) => movement.onDragOver(column.status, event)}
-      onDrop={(event) => movement.onDrop(column.status, event)}
+      data-kanban-drop-status={column.status}
+      data-drop-state={getKanbanDropState(movement.draggedTicket, column.status, "ASESOR", currentAdvisorId, movement.dragTargetStatus)}
     >
-      <header><h3 id={`advisor-column-${column.status}`}>{column.title}</h3><span>{total}</span></header>
+      <header><h3>{column.title}</h3><span>{total}</span></header>
       {query.isLoading ? <Skeleton rows={3} /> : null}
       {query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : null}
-      {!query.isLoading && !query.isError && tickets.length === 0 ? (
-        <StatePanel kind="empty" title={column.title} message={column.emptyMessage} />
-      ) : null}
+      {!query.isLoading && !query.isError && !tickets.length ? <StatePanel kind="empty" title={column.title} message={column.emptyMessage} /> : null}
       {tickets.length ? (
         <div className="staff-kanban__cards">
           {tickets.map((ticket) => (
@@ -649,28 +860,15 @@ function AdvisorKanbanColumn({
               key={ticket.id}
               ticket={ticket}
               basePath="/asesor/tickets"
-              slaFlags={slaFlags}
+              returnTo="/asesor/panel"
               isUpdating={movement.pendingTicketId === ticket.id}
-              responsibleLabel="A tu cargo"
-              movement={{
-                role: "ASESOR",
-                currentAdvisorId,
-                isPending: movement.isPending,
-                failedError: movement.failedTicketId === ticket.id ? movement.failedError : "",
-                retryFailedMove: movement.retryFailedMove,
-                onRequestMove: movement.requestMove,
-                onDragStart: movement.onDragStart,
-                onDragEnd: movement.onDragEnd,
-              }}
+              responsibleLabel={ticket.status === "NUEVO" ? "Sin responsable" : "A tu cargo"}
+              movement={movement}
             />
           ))}
         </div>
       ) : null}
-      {query.hasNextPage ? (
-        <Button variant="secondary" isLoading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
-          Cargar más
-        </Button>
-      ) : null}
+      {query.hasNextPage ? <Button variant="secondary" isLoading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Cargar más</Button> : null}
     </section>
   );
 }
@@ -678,50 +876,126 @@ function AdvisorKanbanColumn({
 function TicketWorkCard({
   ticket,
   basePath,
-  slaFlags,
+  returnTo,
   responsibleLabel,
   isUpdating = false,
   movement,
 }: {
   readonly ticket: Ticket;
   readonly basePath: string;
-  readonly slaFlags?: { readonly overdue: ReadonlySet<string>; readonly soon: ReadonlySet<string> };
+  readonly returnTo: string;
   readonly responsibleLabel?: string;
   readonly isUpdating?: boolean;
-  readonly movement?: {
-    readonly role: KanbanRole;
-    readonly currentAdvisorId: string;
-    readonly isPending: boolean;
-    readonly failedError: string;
-    readonly retryFailedMove: () => void;
-    readonly onRequestMove: (ticket: Ticket, status: TicketStatus) => void;
-    readonly onDragStart: (ticket: Ticket, event: React.DragEvent<HTMLButtonElement>) => void;
-    readonly onDragEnd: () => void;
-  };
+  readonly movement?: ReturnType<typeof useKanbanMovement>;
 }) {
-  const overdue = slaFlags?.overdue.has(ticket.id) ?? false;
-  const soon = slaFlags?.soon.has(ticket.id) ?? false;
+  const navigate = useNavigate();
+  const isUnassignedNew = ticket.status === "NUEVO" && ticket.assigned_advisor_id === null;
+  const isAvailableForAdvisor = movement?.role === "ASESOR" && isUnassignedNew;
+  const isAvailableForSupervisor = movement?.role === "SUPERVISOR" && isUnassignedNew;
+  const isDragging = movement?.draggedTicket?.id === ticket.id;
+
   return (
-    <article className={`staff-ticket-card${isUpdating ? " staff-ticket-card--updating" : ""}`} aria-busy={isUpdating || undefined}>
-      <div className="staff-ticket-card__top"><strong>{ticket.tracking_code}</strong><PriorityBadge priority={ticket.priority} /></div>
-      <h4>{ticket.subject}</h4>
-      <StatusBadge status={ticket.status} />
-      {responsibleLabel ? <p className="staff-ticket-card__owner">{responsibleLabel}</p> : null}
-      {overdue || soon ? (
-        <span className={`staff-sla-flag${overdue ? " staff-sla-flag--overdue" : ""}`}>
-          <Clock3 aria-hidden="true" />{overdue ? "SLA vencido" : "SLA próximo a vencer"}
-        </span>
-      ) : null}
-      <time dateTime={ticket.updated_at}>Actualizado {formatDate(ticket.updated_at)}</time>
+    <article
+      className={`staff-ticket-card staff-ticket-card--redesign${isUpdating ? " staff-ticket-card--updating" : ""}`}
+      aria-busy={isUpdating || undefined}
+      data-dragging={isDragging || undefined}
+      onPointerDown={movement ? (event) => {
+        if (
+          event.pointerType === "touch" &&
+          !(event.target instanceof Element && event.target.closest(".staff-ticket-card__drag-surface"))
+        ) return;
+        movement.onPointerDown(ticket, event);
+      } : undefined}
+      onPointerMove={movement?.onPointerMove}
+      onPointerUp={movement?.onPointerUp}
+      onPointerCancel={movement?.onPointerCancel}
+      onClick={movement && !isAvailableForAdvisor ? (event) => {
+        if (isKanbanInteractiveTarget(event.target) || movement.shouldIgnoreCardClick()) return;
+        void navigate(`${basePath}/${ticket.id}`, { state: { returnTo } });
+      } : undefined}
+    >
+      <div className="staff-ticket-card__drag-surface">
+        <div className="staff-ticket-card__top">
+          <strong>{ticket.tracking_code}</strong>
+          <PriorityBadge priority={ticket.priority} />
+        </div>
+        <h4>{ticket.subject}</h4>
+        <StatusBadge status={ticket.status} />
+        <div className="staff-rework-card__facts">
+          <div><span>Cliente</span><strong>{ticket.client_name?.trim() || "No informado"}</strong></div>
+          <div><span>Responsable</span><strong>{responsibleLabel || ticket.assigned_advisor_name?.trim() || (ticket.assigned_advisor_id ? "Asesor asignado" : "Sin responsable")}</strong></div>
+        </div>
+      </div>
+      <TicketSlaSummary ticket={ticket} role={movement?.role ?? "ASESOR"} />
+      <div className="staff-ticket-card__drag-surface staff-ticket-card__drag-surface--activity">
+        <p className="staff-rework-card__activity"><span>Última actividad</span><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time></p>
+      </div>
       {isUpdating ? <p className="staff-ticket-card__pending" role="status" aria-live="polite"><RefreshCw aria-hidden="true" />Actualizando estado…</p> : null}
-      {movement ? <>
-        <KanbanMovementControls ticket={ticket} {...movement} />
-        <KanbanMoveFailure message={movement.failedError} onRetry={movement.retryFailedMove} disabled={movement.isPending} />
-      </> : null}
-      <Link to={`${basePath}/${ticket.id}`} aria-label={`Abrir detalle ${ticket.tracking_code}`}>
-        Abrir detalle <ChevronRight aria-hidden="true" />
-      </Link>
+      {movement ? <div className="staff-rework-card__actions">
+        {isAvailableForAdvisor ? (
+          <div className="staff-ticket-card__primary-action">
+            <Button
+              disabled={movement.isPending}
+              isLoading={isUpdating}
+              onClick={() => movement.requestMove(ticket, "ASIGNADO")}
+            >
+              <UserCheck aria-hidden="true" />Tomar ticket
+            </Button>
+            <span className="staff-ticket-card__drag-hint" aria-hidden="true" title="Arrastra desde cualquier espacio libre de la tarjeta"><GripVertical /></span>
+          </div>
+        ) : isAvailableForSupervisor ? (
+          <div className="staff-ticket-card__primary-action">
+            <Button
+              disabled={movement.isPending || !getKanbanMoveDecision(ticket, "ASIGNADO", "SUPERVISOR").allowed}
+              isLoading={isUpdating && movement.pendingTicketId === ticket.id}
+              onClick={() => movement.requestMove(ticket, "ASIGNADO")}
+            >
+              Asignar
+            </Button>
+            <span className="staff-ticket-card__drag-hint" aria-hidden="true" title="Arrastra desde cualquier espacio libre de la tarjeta"><GripVertical /></span>
+          </div>
+        ) : (
+          <KanbanMovementControls
+            ticket={ticket}
+            role={movement.role}
+            currentAdvisorId={movement.currentAdvisorId}
+            isPending={movement.isPending}
+            onRequestMove={movement.requestMove}
+          />
+        )}
+        <KanbanMoveFailure
+          message={movement.failedTicketId === ticket.id ? movement.failedError : ""}
+          onRetry={movement.retryFailedMove}
+          disabled={movement.isPending}
+        />
+      </div> : null}
+      {!isAvailableForAdvisor ? (
+        <Link to={`${basePath}/${ticket.id}`} state={{ returnTo }} aria-label={`Abrir detalle ${ticket.tracking_code}`}>
+          Abrir detalle <ChevronRight aria-hidden="true" />
+        </Link>
+      ) : null}
     </article>
+  );
+}
+
+function TicketSlaSummary({ ticket, role }: { readonly ticket: Ticket; readonly role: KanbanRole }) {
+  const canRead = role === "SUPERVISOR" || ticket.status !== "NUEVO";
+  const query = useQuery({
+    queryKey: ["ticket-sla-summary", ticket.id],
+    queryFn: () => api.tickets.sla(ticket.id),
+    enabled: canRead,
+    retry: false,
+  });
+  if (!canRead) return <p className="staff-rework-card__sla"><Clock3 aria-hidden="true" />SLA disponible al tomar el ticket</p>;
+  if (query.isLoading) return <p className="staff-rework-card__sla"><Clock3 aria-hidden="true" />Consultando SLA…</p>;
+  if (query.isError) return <p className="staff-rework-card__sla"><Clock3 aria-hidden="true" />SLA no disponible <button type="button" onClick={() => void query.refetch()}>Reintentar</button></p>;
+  if (!query.data) return <p className="staff-rework-card__sla"><Clock3 aria-hidden="true" />SLA no informado</p>;
+  const status = query.data.status === "BREACHED" ? "Vencido" : query.data.status === "PAUSED" ? "En pausa" : query.data.status === "COMPLETED" ? "Completado" : query.data.status === "CANCELLED" ? "Cancelado" : "En curso";
+  return (
+    <div className={`staff-rework-card__sla${query.data.status === "BREACHED" ? " is-overdue" : ""}`}>
+      <Clock3 aria-hidden="true" />
+      <span><strong>SLA {status}</strong><small>Primera respuesta · {formatSlaDeadline(query.data.first_response_due_at)}</small><small>Resolución · {formatSlaDeadline(query.data.resolution_due_at)}</small></span>
+    </div>
   );
 }
 
@@ -922,7 +1196,7 @@ export function AdvisorInboxPage() {
                 <td><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time></td>
                 <td className="staff-table__action">
                   {action === "take" ? <Button isLoading={take.isPending && take.variables?.id === ticket.id} disabled={take.isPending} onClick={() => take.mutate(ticket)}>Tomar ticket</Button> : null}
-                  {action === "open" ? <Link className="button button--secondary" to={`/asesor/tickets/${ticket.id}`}>Abrir detalle <ChevronRight aria-hidden="true" /></Link> : null}
+                  {action === "open" ? <Link className="button button--secondary" to={`/asesor/tickets/${ticket.id}`} state={{ returnTo: "/asesor/bandeja" }}>Abrir detalle <ChevronRight aria-hidden="true" /></Link> : null}
                   {action === "other" ? <span className="muted">Asignado a otro asesor</span> : null}
                   {action === "none" ? <span className="muted">No disponible</span> : null}
                   {takeErrors[ticket.id] ? <div className="form-error" role="alert">{takeErrors[ticket.id]}{takeErrors[ticket.id]?.includes("conectar") ? <button type="button" onClick={() => take.mutate(ticket)}>Reintentar</button> : null}</div> : null}
@@ -963,6 +1237,7 @@ function datePresetRange(preset: "7d" | "30d" | "week" | "month", now = new Date
 
 function HistoryPage({ role }: { readonly role: "ASESOR" | "SUPERVISOR" }) {
   const basePath = role === "ASESOR" ? "/asesor/tickets" : "/supervisor/tickets";
+  const returnTo = role === "ASESOR" ? "/asesor/historial" : "/supervisor/historial";
   const [preset, setPreset] = useState<"7d" | "30d" | "week" | "month" | "custom">("7d");
   const initialRange = datePresetRange("7d");
   const [from, setFrom] = useState(initialRange.from);
@@ -1002,15 +1277,16 @@ function HistoryPage({ role }: { readonly role: "ASESOR" | "SUPERVISOR" }) {
   };
 
   return (
-    <>
+    <div className="staff-rework-page staff-rework-page--history">
+      <StaffSectionTabs role={role} active="history" />
       <PageIntro title={role === "ASESOR" ? "Historial de atención" : "Historial de tickets"} description="Consulta tickets cerrados o cancelados. Los resueltos siguen activos hasta su cierre." />
-      <p className="staff-history-note">El historial muestra por defecto tickets cerrados y cancelados. Los tickets resueltos continúan en el Kanban hasta que se cierren.</p>
+      <p className="staff-history-note staff-rework-history-note">El historial contiene tickets cerrados y cancelados. Los tickets resueltos continúan en el Kanban hasta que se cierren.</p>
       <FilterDrawer label="Filtros del historial">
       <div className="staff-history-filters" aria-label="Filtros de historial">
         <label><span>Periodo</span><select value={preset} onChange={(event) => setPresetRange(event.target.value as typeof preset)}><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="week">Esta semana</option><option value="month">Este mes</option><option value="custom">Periodo personalizado</option></select></label>
         <label><span>Desde</span><input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPreset("custom"); setPage(1); }} /></label>
         <label><span>Hasta</span><input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPreset("custom"); setPage(1); }} /></label>
-        <label><span>Estado</span><select value={status} onChange={(event) => { setStatus(event.target.value as (typeof historyStatusOptions)[number] | ""); setPage(1); }}><option value="">Finalizados: cerrados y cancelados</option>{historyStatusOptions.map((value) => <option key={value} value={value}>{value === "RESUELTO" ? "Resueltos pendientes de cierre" : getTicketStatusLabel(value)}</option>)}</select></label>
+        <label><span>Estado</span><select value={status} onChange={(event) => { setStatus(event.target.value as (typeof historyStatusOptions)[number] | ""); setPage(1); }}><option value="">Finalizados: cerrados y cancelados</option>{historyStatusOptions.map((value) => <option key={value} value={value}>{getTicketStatusLabel(value)}</option>)}</select></label>
         <label><span>Prioridad</span><select value={priority} onChange={(event) => { setPriority(event.target.value as TicketPriority | ""); setPage(1); }}><option value="">Todas</option>{priorityValues.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <div className="staff-filter-search">
           <label className="staff-filter-search__label" htmlFor="advisor-history-search">
@@ -1034,15 +1310,31 @@ function HistoryPage({ role }: { readonly role: "ASESOR" | "SUPERVISOR" }) {
       </FilterDrawer>
       {loading ? <Skeleton rows={6} /> : null}
       {error ? <QueryError error={error} retry={() => void Promise.all(queries.map((query) => query.refetch()))} /> : null}
-      {!loading && !error && items.length ? <TicketHistoryTable tickets={items} basePath={basePath} /> : null}
-      {!loading && !error && !items.length ? <StatePanel kind="empty" title={status === "RESUELTO" ? "No hay tickets resueltos pendientes de cierre" : "No hay tickets finalizados en este periodo"} message={status === "RESUELTO" ? "Los tickets resueltos siguen activos y pueden consultarse de nuevo desde el Kanban." : "Ajusta el rango de fechas o cambia el filtro de estado."} /> : null}
+      {!loading && !error && items.length ? <TicketHistoryTable tickets={items} basePath={basePath} returnTo={returnTo} /> : null}
+      {!loading && !error && !items.length ? <StatePanel kind="empty" title="No hay tickets finalizados en este periodo" message="Ajusta el rango de fechas o cambia el filtro de estado." /> : null}
       {!loading && !error ? <PaginationControls page={page} totalPages={totalPages} total={total} onPageChange={setPage} /> : null}
-    </>
+    </div>
   );
 }
 
-function TicketHistoryTable({ tickets, basePath }: { readonly tickets: readonly Ticket[]; readonly basePath: string }) {
-  return <div className="staff-table-wrap"><table className="staff-table"><thead><tr><th>Código</th><th>Solicitud</th><th>Prioridad</th><th>Estado</th><th>Actualización</th><th /></tr></thead><tbody>{tickets.map((ticket) => <tr key={ticket.id}><td><strong>{ticket.tracking_code}</strong></td><td><span className="staff-table__subject">{ticket.subject}</span></td><td><PriorityBadge priority={ticket.priority} /></td><td><StatusBadge status={ticket.status} /></td><td><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time></td><td><Link className="text-link" to={`${basePath}/${ticket.id}`}>Abrir detalle <ChevronRight aria-hidden="true" /></Link></td></tr>)}</tbody></table></div>;
+function TicketHistoryTable({ tickets, basePath, returnTo }: { readonly tickets: readonly Ticket[]; readonly basePath: string; readonly returnTo: string }) {
+  return (
+    <div className="staff-history-results">
+      <div className="staff-table-wrap staff-history-table-wrap"><table className="staff-table staff-history-table"><thead><tr><th>Código</th><th>Solicitud</th><th>Cliente</th><th>Prioridad</th><th>Estado</th><th>Actualización</th><th /></tr></thead><tbody>{tickets.map((ticket) => <tr key={ticket.id}><td><strong>{ticket.tracking_code}</strong></td><td><span className="staff-table__subject">{ticket.subject}</span></td><td>{ticket.client_name?.trim() || "No informado"}</td><td><PriorityBadge priority={ticket.priority} /></td><td><StatusBadge status={ticket.status} /></td><td><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time></td><td><Link className="text-link" state={{ returnTo }} to={`${basePath}/${ticket.id}`}>Abrir detalle <ChevronRight aria-hidden="true" /></Link></td></tr>)}</tbody></table></div>
+      <ul className="staff-history-cards" aria-label="Tickets finalizados">
+        {tickets.map((ticket) => (
+          <li key={ticket.id}>
+            <div className="staff-history-cards__top"><strong>{ticket.tracking_code}</strong><StatusBadge status={ticket.status} /></div>
+            <h2>{ticket.subject}</h2>
+            <p><span>Cliente</span><strong>{ticket.client_name?.trim() || "No informado"}</strong></p>
+            <p><span>Prioridad</span><PriorityBadge priority={ticket.priority} /></p>
+            <time dateTime={ticket.updated_at}>Actualizado {formatDate(ticket.updated_at)}</time>
+            <Link className="text-link" state={{ returnTo }} to={`${basePath}/${ticket.id}`}>Abrir detalle <ChevronRight aria-hidden="true" /></Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function SupervisorDashboardPage() {
@@ -1073,7 +1365,7 @@ export function SupervisorDashboardPage() {
       {hasCountError ? <div className="form-notice" role="status">Uno o más indicadores no pudieron cargarse desde el servicio.</div> : null}
       <section className="content-section">
         <div className="section-bar"><div><h2>Actividad reciente</h2><p>Cambios recientes que requieren contexto operativo.</p></div><Link className="button button--secondary" to="/supervisor/cola">Ir a la cola <ArrowUpRight aria-hidden="true" /></Link></div>
-        {recent.isLoading ? <Skeleton rows={4} /> : recent.isError ? <QueryError error={recent.error} retry={() => void recent.refetch()} /> : recent.data?.items.length ? <div className="staff-recent-list">{recent.data.items.map((ticket) => <Link key={ticket.id} to={`/supervisor/tickets/${ticket.id}`}><span><strong>{ticket.tracking_code}</strong><b>{ticket.subject}</b></span><StatusBadge status={ticket.status} /><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time><ChevronRight aria-hidden="true" /></Link>)}</div> : <StatePanel kind="empty" title="Sin actividad reciente" message="No hay tickets actualizados en el periodo de operación reciente." />}
+        {recent.isLoading ? <Skeleton rows={4} /> : recent.isError ? <QueryError error={recent.error} retry={() => void recent.refetch()} /> : recent.data?.items.length ? <div className="staff-recent-list">{recent.data.items.map((ticket) => <Link key={ticket.id} to={`/supervisor/tickets/${ticket.id}`} state={{ returnTo: "/supervisor/operacion" }}><span><strong>{ticket.tracking_code}</strong><b>{ticket.subject}</b></span><StatusBadge status={ticket.status} /><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time><ChevronRight aria-hidden="true" /></Link>)}</div> : <StatePanel kind="empty" title="Sin actividad reciente" message="No hay tickets actualizados en el periodo de operación reciente." />}
       </section>
       <div className="supervisor-shortcuts"><Link to="/supervisor/cola"><TableProperties aria-hidden="true" /><span><strong>Cola de tickets</strong><small>Filtra, revisa y asigna tickets activos.</small></span><ChevronRight aria-hidden="true" /></Link><Link to="/supervisor/asignaciones"><UserCheck aria-hidden="true" /><span><strong>Asignaciones</strong><small>Distribuye tickets entre asesores activos.</small></span><ChevronRight aria-hidden="true" /></Link><Link to="/supervisor/sla"><Clock3 aria-hidden="true" /><span><strong>Control de SLA</strong><small>Consulta las políticas de atención.</small></span><ChevronRight aria-hidden="true" /></Link></div>
     </>
@@ -1130,7 +1422,7 @@ function TicketFilterFields({
 export function SupervisorQueuePage() {
   const queryClient = useQueryClient();
   const advisors = useQuery({ queryKey: ["advisors"], queryFn: api.users.advisors });
-  const [view, setView] = useState<"table" | "kanban">("table");
+  const [view, setView] = useState<"table" | "kanban">("kanban");
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<SupervisorFilters>({ status: "", advisorId: "", priority: "", sla: "", search: "", from: "", to: "", unassignedOnly: false });
   const changeFilters = (next: Partial<SupervisorFilters>) => { setFilters((previous) => ({ ...previous, ...next })); setPage(1); };
@@ -1188,9 +1480,10 @@ export function SupervisorQueuePage() {
   const totalPages = queueMode && view === "table" ? ticketPages(operations.data) : Math.max(1, ...tableQueries.map((query) => ticketPages(query.data)));
 
   return (
-    <>
+    <div className="staff-rework-page">
+      <StaffSectionTabs role="SUPERVISOR" active="board" />
       <PageIntro title="Cola de atención" description="Administra tickets activos con filtros de estado, responsable, prioridad, SLA y fecha." />
-      <div className="staff-view-switch" role="tablist" aria-label="Vista de la cola">
+      <div className="staff-view-switch staff-rework-view-switch" role="tablist" aria-label="Vista de la cola">
         <button type="button" role="tab" aria-selected={view === "table"} onClick={() => setView("table")}><TableProperties aria-hidden="true" />Vista tabla</button>
         <button type="button" role="tab" aria-selected={view === "kanban"} onClick={() => setView("kanban")}><LayoutGrid aria-hidden="true" />Vista Kanban</button>
       </div>
@@ -1207,7 +1500,7 @@ export function SupervisorQueuePage() {
         <SupervisorKanban filters={filters} advisors={advisors.data ?? []} />
       )}
       {assignment.error ? <div className="form-error" role="alert">{errorMessage(assignment.error)}</div> : null}
-    </>
+    </div>
   );
 }
 
@@ -1224,10 +1517,10 @@ function SupervisorTicketTable({
   return (
     <div className="staff-table-wrap staff-table-wrap--supervisor"><table className="staff-table staff-table--supervisor"><thead><tr><th>Código</th><th>Solicitud</th><th>Prioridad</th><th>Estado</th><th>Asesor asignado</th><th>Actualización</th><th>Acción</th></tr></thead><tbody>
       {tickets.map((ticket) => <tr key={ticket.id}>
-        <td><strong>{ticket.tracking_code}</strong></td><td><Link className="staff-table__subject" to={`/supervisor/tickets/${ticket.id}`}>{ticket.subject}</Link></td><td><PriorityBadge priority={ticket.priority} /></td><td><StatusBadge status={ticket.status} /></td>
+        <td><strong>{ticket.tracking_code}</strong></td><td><Link className="staff-table__subject" to={`/supervisor/tickets/${ticket.id}`} state={{ returnTo: "/supervisor/cola" }}>{ticket.subject}</Link></td><td><PriorityBadge priority={ticket.priority} /></td><td><StatusBadge status={ticket.status} /></td>
         <td>{getTicketResponsibleLabel(ticket, "SUPERVISOR", advisors)}</td>
         <td><time dateTime={ticket.updated_at}>{formatDate(ticket.updated_at)}</time></td>
-        <td className="staff-table__action"><div className="staff-inline-assign"><label><span className="sr-only">Asignar {ticket.tracking_code}</span><select value={selectedAdvisors[ticket.id] ?? ""} onChange={(event) => setSelectedAdvisors((previous) => ({ ...previous, [ticket.id]: event.target.value }))}><option value="">{ticket.assigned_advisor_id ? "Reasignar…" : "Asignar…"}</option>{advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.full_name}</option>)}</select></label><Button variant="secondary" disabled={!selectedAdvisors[ticket.id] || assignment.isPending} isLoading={assignment.isPending && assignment.variables?.ticket.id === ticket.id} onClick={() => { const advisorId = selectedAdvisors[ticket.id]; if (advisorId && window.confirm(`¿Confirmas ${ticket.assigned_advisor_id ? "reasignar" : "asignar"} ${ticket.tracking_code}?`)) assignment.mutate({ ticket, advisorId }); }}>Guardar</Button></div><Link className="text-link" to={`/supervisor/tickets/${ticket.id}`}>Detalle <ChevronRight aria-hidden="true" /></Link></td>
+        <td className="staff-table__action"><div className="staff-inline-assign"><label><span className="sr-only">Asignar {ticket.tracking_code}</span><select value={selectedAdvisors[ticket.id] ?? ""} onChange={(event) => setSelectedAdvisors((previous) => ({ ...previous, [ticket.id]: event.target.value }))}><option value="">{ticket.assigned_advisor_id ? "Reasignar…" : "Asignar…"}</option>{advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.full_name}</option>)}</select></label><Button variant="secondary" disabled={!selectedAdvisors[ticket.id] || assignment.isPending} isLoading={assignment.isPending && assignment.variables?.ticket.id === ticket.id} onClick={() => { const advisorId = selectedAdvisors[ticket.id]; if (advisorId && window.confirm(`¿Confirmas ${ticket.assigned_advisor_id ? "reasignar" : "asignar"} ${ticket.tracking_code}?`)) assignment.mutate({ ticket, advisorId }); }}>Guardar</Button></div><Link className="text-link" state={{ returnTo: "/supervisor/cola" }} to={`/supervisor/tickets/${ticket.id}`}>Detalle <ChevronRight aria-hidden="true" /></Link></td>
       </tr>)}
     </tbody></table></div>
   );
@@ -1235,18 +1528,20 @@ function SupervisorTicketTable({
 
 function SupervisorKanban({ filters, advisors }: { readonly filters: SupervisorFilters; readonly advisors: readonly PublicUser[] }) {
   const [mobileStatus, setMobileStatus] = useState<TicketStatus>("NUEVO");
+  const [stageTotals, setStageTotals] = useState<Partial<Record<TicketStatus, number>>>({});
+  const reportStageTotal = useCallback((status: TicketStatus, total: number) => {
+    setStageTotals((previous) => previous[status] === total ? previous : { ...previous, [status]: total });
+  }, []);
   const movement = useKanbanMovement("SUPERVISOR", advisors, "", setMobileStatus);
   const statuses = filters.status ? [filters.status] : supervisorStatuses;
   const activeMobileStatus = statuses.find((status) => status === mobileStatus)
     ?? statuses[0]
     ?? "NUEVO";
   return (
-    <section className="staff-board-section" aria-label="Kanban de supervisión">
-      <div className="staff-mobile-tabs" role="tablist" aria-label="Estado del Kanban">
-        {statuses.map((status) => <button key={status} type="button" role="tab" aria-selected={activeMobileStatus === status} onClick={() => setMobileStatus(status)}>{getTicketStatusLabel(status)}</button>)}
-      </div>
-      <div className="staff-kanban staff-kanban--supervisor" data-mobile-status={activeMobileStatus}>
-        {statuses.map((status) => <SupervisorKanbanColumn key={status} status={status} filters={filters} advisors={advisors} movement={movement} />)}
+    <section className="staff-board-section staff-rework-board" aria-label="Kanban de supervisión">
+      <StaffStageTabs statuses={statuses} selected={activeMobileStatus} counts={stageTotals} onSelect={setMobileStatus} movement={movement} role="SUPERVISOR" />
+      <div className="staff-kanban staff-kanban--supervisor staff-kanban--redesign" data-mobile-status={activeMobileStatus}>
+        {statuses.map((status) => <SupervisorKanbanColumn key={status} status={status} filters={filters} advisors={advisors} reportTotal={reportStageTotal} movement={movement} />)}
       </div>
       {movement.feedback ? <p className="staff-kanban-feedback" role="status" aria-live="polite">{movement.feedback}</p> : null}
       {movement.dialog}
@@ -1254,7 +1549,7 @@ function SupervisorKanban({ filters, advisors }: { readonly filters: SupervisorF
   );
 }
 
-function SupervisorKanbanColumn({ status, filters, advisors, movement }: { readonly status: TicketStatus; readonly filters: SupervisorFilters; readonly advisors: readonly PublicUser[]; readonly movement: ReturnType<typeof useKanbanMovement> }) {
+function SupervisorKanbanColumn({ status, filters, advisors, reportTotal, movement }: { readonly status: TicketStatus; readonly filters: SupervisorFilters; readonly advisors: readonly PublicUser[]; readonly reportTotal: (status: TicketStatus, total: number) => void; readonly movement: ReturnType<typeof useKanbanMovement> }) {
   const query = useInfiniteQuery({
     queryKey: ["tickets", "supervisor-kanban", status, filters],
     initialPageParam: 1,
@@ -1267,7 +1562,7 @@ function SupervisorKanbanColumn({ status, filters, advisors, movement }: { reado
         created_from: toIsoStart(filters.from),
         created_to: toIsoEnd(filters.to),
         page: pageParam,
-        page_size: pageSize,
+        page_size: kanbanPageSize,
       };
       return filters.unassignedOnly || filters.sla
         ? api.tickets.operations({
@@ -1284,52 +1579,45 @@ function SupervisorKanbanColumn({ status, filters, advisors, movement }: { reado
     },
   });
   const tickets = query.data?.pages.flatMap((page) => ticketItems(page)) ?? [];
-  const total = query.data?.pages[0] ? ticketTotal(query.data.pages[0]) : 0;
-  const queryClient = useQueryClient();
-  const [advisorId, setAdvisorId] = useState<Record<string, string>>({});
-  const assign = useMutation({
-    mutationFn: ({ ticket, advisor }: { readonly ticket: Ticket; readonly advisor: string }) => api.tickets.assign(ticket.id, advisor, ticket.version),
-    onSuccess: async () => { await invalidateTicketLists(queryClient); },
-    onError: async (error) => { if (isConflict(error)) await queryClient.invalidateQueries({ queryKey: ["tickets", "supervisor-kanban"] }); },
-  });
+  const firstPage = query.data?.pages[0];
+  const total = firstPage ? ticketTotal(firstPage) : 0;
+  useEffect(() => {
+    if (firstPage) reportTotal(status, total);
+  }, [firstPage, reportTotal, status, total]);
+  const isDropTarget = movement.dragTargetStatus === status;
   return <section
-    className="staff-kanban__column"
+    className="staff-kanban__column staff-kanban__column--redesign"
+    id={`staff-stage-panel-${status}`}
+    role="tabpanel"
+    aria-labelledby={`staff-stage-tab-${status}`}
     data-status={status}
-    data-drop-state={movement.draggedTicket ? (getKanbanMoveDecision(movement.draggedTicket, status, "SUPERVISOR").allowed ? "valid" : "invalid") : undefined}
-    aria-labelledby={`supervisor-column-${status}`}
-    onDragOver={(event) => movement.onDragOver(status, event)}
-    onDrop={(event) => movement.onDrop(status, event)}
+    data-kanban-drop-status={status}
+    data-drop-state={getKanbanDropState(movement.draggedTicket, status, "SUPERVISOR", "", movement.dragTargetStatus)}
   >
-    <header><h3 id={`supervisor-column-${status}`}>{getTicketStatusLabel(status)}</h3><span>{total}</span></header>
+    <header>
+      <h3 id={`supervisor-column-${status}`}>{getTicketStatusLabel(status)}</h3>
+      <span>{total}</span>
+      {isDropTarget ? <span className="staff-kanban__drop-target">Destino</span> : null}
+    </header>
     {query.isLoading ? <Skeleton rows={3} /> : null}
     {query.isError ? <QueryError error={query.error} retry={() => void query.refetch()} /> : null}
     {!query.isLoading && !query.isError && !tickets.length ? <StatePanel kind="empty" title={getTicketStatusLabel(status)} message="No hay tickets en este estado con los filtros actuales." /> : null}
-    {tickets.length ? <div className="staff-kanban__cards">{tickets.map((ticket) => {
-      const isUpdating = movement.pendingTicketId === ticket.id;
-      return <article key={ticket.id} className={`staff-ticket-card staff-ticket-card--supervisor${isUpdating ? " staff-ticket-card--updating" : ""}`} aria-busy={isUpdating || undefined}>
-        <div className="staff-ticket-card__summary">
-          <div className="staff-ticket-card__top"><strong>{ticket.tracking_code}</strong><PriorityBadge priority={ticket.priority} /></div>
-          <h4>{ticket.subject}</h4>
-          <div className="staff-ticket-card__meta">
-            <StatusBadge status={ticket.status} />
-            <p className="staff-ticket-card__owner">{getTicketResponsibleLabel(ticket, "SUPERVISOR", advisors)}</p>
-          </div>
-          <time dateTime={ticket.updated_at}>Actualizado {formatDate(ticket.updated_at)}</time>
-        </div>
-        <div className="staff-ticket-card__controls">
-          {isUpdating ? <p className="staff-ticket-card__pending" role="status" aria-live="polite"><RefreshCw aria-hidden="true" />Actualizando estado…</p> : null}
-          <KanbanMovementControls ticket={ticket} role="SUPERVISOR" currentAdvisorId="" isPending={movement.isPending} onRequestMove={movement.requestMove} onDragStart={movement.onDragStart} onDragEnd={movement.onDragEnd} />
-          <KanbanMoveFailure message={movement.failedTicketId === ticket.id ? movement.failedError : ""} onRetry={movement.retryFailedMove} disabled={movement.isPending} />
-          <div className="staff-ticket-card__assignment">
-            <label><span className="sr-only">Seleccionar asesor para {ticket.tracking_code}</span><select value={advisorId[ticket.id] ?? ""} disabled={movement.isPending || assign.isPending} onChange={(event) => setAdvisorId((previous) => ({ ...previous, [ticket.id]: event.target.value }))}><option value="">{ticket.assigned_advisor_id ? "Reasignar asesor…" : "Asignar asesor…"}</option>{advisors.map((advisor) => <option key={advisor.id} value={advisor.id}>{advisor.full_name}</option>)}</select></label>
-            <Button variant="secondary" disabled={!advisorId[ticket.id] || assign.isPending || movement.isPending} isLoading={assign.isPending && assign.variables?.ticket.id === ticket.id} onClick={() => { const value = advisorId[ticket.id]; if (value && window.confirm(`¿Confirmas ${ticket.assigned_advisor_id ? "reasignar" : "asignar"} ${ticket.tracking_code}?`)) assign.mutate({ ticket, advisor: value }); }}>{ticket.assigned_advisor_id ? "Reasignar" : "Asignar"}</Button>
-          </div>
-          <Link className="staff-ticket-card__details" to={`/supervisor/tickets/${ticket.id}`}>Abrir detalle <ChevronRight aria-hidden="true" /></Link>
-        </div>
-      </article>;
-    })}</div> : null}
+    {tickets.length ? (
+      <div className="staff-kanban__cards">
+        {tickets.map((ticket) => (
+          <TicketWorkCard
+            key={ticket.id}
+            ticket={ticket}
+            basePath="/supervisor/tickets"
+            returnTo="/supervisor/cola"
+            responsibleLabel={getTicketResponsibleLabel(ticket, "SUPERVISOR", advisors)}
+            isUpdating={movement.pendingTicketId === ticket.id}
+            movement={movement}
+          />
+        ))}
+      </div>
+    ) : null}
     {query.hasNextPage ? <Button variant="secondary" isLoading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Cargar más</Button> : null}
-    {assign.error ? <p className="form-error" role="alert">{errorMessage(assign.error)}</p> : null}
   </section>;
 }
 

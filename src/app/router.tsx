@@ -19,6 +19,7 @@ const authPages = () => import("../pages/auth-pages");
 const portalPages = () => import("../pages/portal-pages");
 const staffPages = () => import("../pages/staff-pages");
 const staffOperationsPages = () => import("../pages/staff-operations");
+const staffTicketDetailPages = () => import("../pages/staff-ticket-detail");
 const HomePage = page(publicPages, "HomePage");
 const HowItWorksPage = page(publicPages, "HowItWorksPage");
 const PublicFaqPage = page(publicPages, "PublicFaqPage");
@@ -38,6 +39,9 @@ const NewTicketPage = page(portalPages, "NewTicketPage");
 const TicketCreatedPage = page(portalPages, "TicketCreatedPage");
 const TicketDetailPage = lazy(async () => ({
   default: (await portalPages()).TicketDetailPage,
+}));
+const StaffTicketDetailPage = lazy(async () => ({
+  default: (await staffTicketDetailPages()).StaffTicketDetailPage,
 }));
 const ClientFaqPage = page(portalPages, "ClientFaqPage");
 const ChatbotPage = page(portalPages, "ChatbotPage");
@@ -112,7 +116,7 @@ export const router = createBrowserRouter([
           { path: "conocimiento", element: <KnowledgePage /> },
           {
             path: "tickets/:id",
-            element: <TicketDetailPage basePath="/asesor/bandeja" />,
+            element: <StaffTicketDetailPage fallbackPath="/asesor/panel" />,
           },
           { path: "perfil", element: <ProfilePage /> },
         ],
@@ -136,7 +140,7 @@ export const router = createBrowserRouter([
           { path: "auditoria", element: <AuditPage /> },
           {
             path: "tickets/:id",
-            element: <TicketDetailPage basePath="/supervisor/cola" />,
+            element: <StaffTicketDetailPage fallbackPath="/supervisor/cola" />,
           },
           { path: "perfil", element: <ProfilePage /> },
         ],

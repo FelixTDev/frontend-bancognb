@@ -154,6 +154,7 @@ async function installMockApp(page: Page, role: UserRole) {
   respondJson("GET", "/api/v1/notifications", 200, pageResult([]));
   respondJson("GET", "/api/v1/tickets/operations", 200, pageResult([]));
   respondJson("GET", "/api/v1/users/advisors", 200, []);
+  respondJson("GET", "/api/v1/categories", 200, []);
 
   return {
     requests,
@@ -191,7 +192,7 @@ test("el detalle espera autorización antes de cargar conversación, adjuntos, h
   mock.respondJson("GET", `/api/v1/tickets/${ticketId}/sla`, 200, { status: "ACTIVE" });
 
   await page.goto(`/asesor/tickets/${ticketId}`);
-  await expect(page.getByRole("status", { name: "Cargando contenido" })).toBeVisible();
+  await expect(page.getByText("Comprobando acceso y cargando ticket.")).toBeVisible();
   expect(relatedTicketRequests(mock.requests)).toEqual([]);
 
   releaseTicketResponse();
@@ -208,13 +209,13 @@ test("un 403 directo informa acceso denegado, no consulta recursos relacionados 
   });
 
   await page.goto(`/asesor/tickets/${ticketId}`);
-  await expect(page.getByRole("heading", { name: "No tienes acceso a esta solicitud" })).toBeVisible();
-  await expect(page.getByText("No encontramos esta solicitud")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No tienes acceso a este ticket" })).toBeVisible();
+  await expect(page.getByText("No encontramos este ticket")).toHaveCount(0);
   expect(relatedTicketRequests(mock.requests)).toEqual([]);
   expect(mock.requestCount("GET", `/api/v1/tickets/${ticketId}`)).toBe(1);
 
-  await page.getByRole("button", { name: "Volver a la bandeja" }).click();
-  await expect(page).toHaveURL(/\/asesor\/bandeja$/);
+  await page.getByRole("button", { name: "Volver al tablero" }).click();
+  await expect(page).toHaveURL(/\/asesor\/panel$/);
   expect(relatedTicketRequests(mock.requests)).toEqual([]);
   expect(mock.requestCount("GET", `/api/v1/tickets/${ticketId}`)).toBe(1);
   expect(mock.unhandledMutations).toEqual([]);
@@ -228,7 +229,7 @@ test("distingue ticket inexistente de falta de acceso", async ({ page }) => {
   });
 
   await page.goto(`/asesor/tickets/${ticketId}`);
-  await expect(page.getByRole("heading", { name: "No encontramos esta solicitud" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No encontramos este ticket" })).toBeVisible();
   expect(relatedTicketRequests(mock.requests)).toEqual([]);
   expect(mock.requestCount("GET", `/api/v1/tickets/${ticketId}`)).toBe(1);
 });
@@ -243,7 +244,7 @@ test("distingue el error de red y no consulta recursos secundarios", async ({ pa
   expect(mock.requestCount("GET", `/api/v1/tickets/${ticketId}`)).toBe(1);
 });
 
-test("liberar por el Asesor confirma, navega al panel y no vuelve a consultar el detalle", async ({ page }) => {
+test("liberar por el Asesor navega al panel y no vuelve a consultar el detalle", async ({ page }) => {
   const mock = await installMockApp(page, "ASESOR");
   let currentTicket = ticketFixture({ status: "EN_PROCESO" });
   mock.respond("GET", `/api/v1/tickets/${ticketId}`, (route) => json(200, currentTicket)(route));
@@ -269,12 +270,11 @@ test("liberar por el Asesor confirma, navega al panel y no vuelve a consultar el
   await page.goto(`/asesor/tickets/${ticketId}`);
   await expect(page.getByRole("heading", { name: "Consulta de prueba", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Historial" })).toBeVisible();
-  await page.getByLabel("Motivo para liberar").fill("Redistribución operativa validada.");
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("button", { name: "Liberar ticket" }).click();
+  await page.getByLabel("Motivo de liberación").fill("Redistribución operativa validada.");
+  await page.getByRole("button", { name: "Liberar a Disponibles" }).click();
 
   await expect(page).toHaveURL(/\/asesor\/panel$/);
-  await expect(page.getByText("El ticket volvió a Disponible y quedó sin responsable.", { exact: true })).toBeVisible();
+  await expect(page.getByText("El ticket se liberó y volvió a Disponibles.", { exact: true })).toBeVisible();
   expect(mock.requestCount("GET", `/api/v1/tickets/${ticketId}`)).toBe(1);
   expect(relatedTicketRequests(mock.requests).filter((request) => request.method === "GET")).toHaveLength(4);
   expect(mock.interceptedMutations).toEqual([`POST /api/v1/tickets/${ticketId}/release`]);
@@ -341,28 +341,28 @@ test("comentarios e historial muestran nombres, roles, transición y motivo una 
   await page.goto(`/supervisor/tickets/${ticketId}`);
   await expect(page.getByText("Cliente · María Paredes")).toBeVisible();
   await expect(page.getByText("Asesor · Ana Torres")).toBeVisible();
-  await expect(page.locator(".messages").getByText("Supervisor · Luis Rivas", { exact: true })).toBeVisible();
-  await expect(page.locator(".message-avatar--cliente")).toHaveText("MP");
-  await expect(page.locator(".message-avatar--asesor")).toHaveText("AT");
-  await expect(page.locator(".message-avatar--supervisor")).toHaveText("LR");
+  await expect(page.locator(".staff-detail-messages").getByText("Supervisor · Luis Rivas", { exact: true })).toBeVisible();
+  await expect(page.locator(".staff-detail-message--cliente .staff-detail-message__avatar")).toHaveText("MP");
+  await expect(page.locator(".staff-detail-message--asesor .staff-detail-message__avatar")).toHaveText("AT");
+  await expect(page.locator(".staff-detail-message--supervisor .staff-detail-message__avatar")).toHaveText("LR");
   await expect(page.getByText("María Paredes", { exact: true })).toBeVisible();
   await expect(page.getByText("Ana Torres", { exact: true })).toBeVisible();
 
-  const historyPanel = page.locator(".detail-panel").filter({
+  const historyPanel = page.locator(".staff-detail-section").filter({
     has: page.getByRole("heading", { name: "Historial" }),
   });
   await expect(historyPanel.getByText("Por atender → Disponible")).toBeVisible();
-  await expect(historyPanel.locator(".timeline li").first().locator(".history-actor")).toHaveText("Por Supervisor · Luis Rivas");
+  await expect(historyPanel.locator(".staff-detail-timeline__item").first().locator(".staff-detail-timeline__meta")).toContainText("Supervisor · Luis Rivas");
   await expect(historyPanel.getByText("Primera respuesta enviada")).toBeVisible();
   await expect(historyPanel.getByText("Plazo de atención vencido")).toBeVisible();
-  await expect(historyPanel.getByText(releaseReason, { exact: true })).toHaveCount(1);
+  await expect(historyPanel.locator(".staff-detail-timeline__context").filter({ hasText: releaseReason })).toHaveCount(1);
   const visibleText = await page.locator("body").innerText();
   expect(visibleText).not.toContain(clientId);
   expect(visibleText).not.toContain(advisorId);
   const dimensions = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,
     content: document.documentElement.scrollWidth,
-    conversation: document.querySelector(".conversation")?.getBoundingClientRect().width ?? 0,
+    conversation: document.querySelector(".staff-detail-messages")?.getBoundingClientRect().width ?? 0,
   }));
   expect(dimensions.conversation).toBeGreaterThan(0);
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
@@ -384,12 +384,12 @@ test("los nombres faltantes usan etiquetas neutrales y nunca muestran UUID", asy
   mock.respondJson("GET", `/api/v1/tickets/${ticketId}/sla`, 200, { status: "ACTIVE" });
 
   await page.goto(`/asesor/tickets/${ticketId}`);
-  const ticketFacts = page.locator(".staff-ticket-detail .detail-panel dl");
-  await expect(ticketFacts.locator("dd").nth(0)).toHaveText("Cliente");
+  const ticketFacts = page.locator(".staff-detail-facts");
+  await expect(ticketFacts.locator("dd").nth(0)).toHaveText("No informado");
   await expect(ticketFacts.locator("dd").nth(1)).toHaveText("Asesor asignado");
   await expect(page.getByText("Cliente ·", { exact: false })).toHaveCount(0);
-  await expect(page.locator(".message-avatar--cliente")).toHaveText("CL");
-  await expect(page.locator(".message-avatar--asesor")).toHaveText("AS");
+  await expect(page.locator(".staff-detail-message--cliente .staff-detail-message__avatar")).toHaveText("CL");
+  await expect(page.locator(".staff-detail-message--asesor .staff-detail-message__avatar")).toHaveText("AS");
   const visibleText = await page.locator("body").innerText();
   expect(visibleText).not.toContain(clientId);
   expect(visibleText).not.toContain(advisorId);
@@ -405,9 +405,10 @@ for (const terminalStatus of ["CERRADO", "CANCELADO"] as const) {
     mock.respondJson("GET", `/api/v1/tickets/${ticketId}/sla`, 200, { status: "ACTIVE" });
 
     await page.goto(`/asesor/tickets/${ticketId}`);
-    await expect(page.getByRole("textbox", { name: "Agregar comentario" })).toBeDisabled();
-    await expect(page.getByText(/las acciones operativas están deshabilitadas/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Liberar ticket" })).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Agregar comentario" })).toHaveCount(0);
+    await expect(page.getByText(/modo consulta: ticket/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Acciones operativas" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Liberar a Disponibles" })).toHaveCount(0);
     expect(mock.unhandledMutations).toEqual([]);
   });
 }
@@ -425,6 +426,6 @@ test("el Asesor no ve la acción de liberar un ticket asignado a otra persona", 
 
   await page.goto(`/asesor/tickets/${ticketId}`);
   await expect(page.getByText("Este ticket pertenece a otro asesor.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Liberar ticket" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Liberar a Disponibles" })).toHaveCount(0);
   expect(mock.unhandledMutations).toEqual([]);
 });

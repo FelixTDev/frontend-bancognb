@@ -46,14 +46,16 @@ const ticket = (
 });
 
 describe("staff operations model", () => {
-  it("defines only the four active states in the advisor Kanban", () => {
+  it("defines the available and assigned active states in the advisor Kanban", () => {
     expect(advisorKanbanColumns.map(({ status }) => status)).toEqual([
+      "NUEVO",
       "ASIGNADO",
       "EN_PROCESO",
       "PENDIENTE_CLIENTE",
       "RESUELTO",
     ]);
     expect(advisorKanbanColumns.map(({ emptyMessage }) => emptyMessage)).toEqual([
+      "No hay tickets nuevos sin responsable.",
       "No tienes tickets asignados pendientes de iniciar.",
       "No hay tickets en proceso.",
       "No hay solicitudes esperando información.",
@@ -139,7 +141,11 @@ describe("staff operations model", () => {
       allowed: true,
       action: { kind: "assign", targetStatus: "ASIGNADO" },
     });
-    expect(getKanbanMoveDecision(ticket("new", "NUEVO", "MEDIA", null), "ASIGNADO", "ASESOR", "advisor-1").allowed).toBe(false);
+    expect(getKanbanMoveDecision(ticket("new", "NUEVO", "MEDIA", null), "ASIGNADO", "ASESOR", "advisor-1")).toEqual({
+      allowed: true,
+      action: { kind: "take", targetStatus: "ASIGNADO" },
+    });
+    expect(getKanbanMoveDecision(ticket("new", "NUEVO", "MEDIA", null), "EN_PROCESO", "ASESOR", "advisor-1").allowed).toBe(false);
     expect(getKanbanMoveDecision(ticket("assigned", "ASIGNADO"), "NUEVO", "SUPERVISOR")).toEqual({
       allowed: true,
       action: { kind: "release", targetStatus: "NUEVO" },
@@ -148,7 +154,16 @@ describe("staff operations model", () => {
       allowed: true,
       action: { kind: "status", targetStatus: "EN_PROCESO", requiresReason: true },
     });
+    expect(getKanbanMoveDecision(ticket("resolved", "RESUELTO"), "ASIGNADO", "SUPERVISOR")).toEqual({
+      allowed: true,
+      action: { kind: "assign", targetStatus: "RESUELTO" },
+    });
+    expect(getKanbanMoveDecision(ticket("assigned", "EN_PROCESO"), "EN_PROCESO", "SUPERVISOR")).toEqual({
+      allowed: false,
+      reason: "El ticket ya está en esa columna.",
+    });
     expect(getKanbanMoveDecision(ticket("closed", "CERRADO"), "NUEVO", "SUPERVISOR").allowed).toBe(false);
     expect(getKanbanMoveOptions(ticket("resolved", "RESUELTO"), "ASESOR", "advisor-1").map(({ status }) => status)).toEqual(["NUEVO", "EN_PROCESO"]);
+    expect(getKanbanMoveOptions(ticket("resolved", "RESUELTO"), "SUPERVISOR").map(({ status }) => status)).toEqual(["NUEVO", "ASIGNADO", "EN_PROCESO"]);
   });
 });
