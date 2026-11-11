@@ -274,6 +274,8 @@ function useKanbanMovement(
   onStatusChanged?: (status: TicketStatus) => void,
 ) {
   const queryClient = useQueryClient();
+  const { session } = useAuth();
+  const userId = session?.user.id ?? "";
   const [selectedMove, setSelectedMove] = useState<RequestedKanbanMove | null>(null);
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
   const [dragTargetStatus, setDragTargetStatus] = useState<TicketStatus | null>(null);
@@ -303,13 +305,16 @@ function useKanbanMovement(
       return api.tickets.changeStatus(ticket.id, action.targetStatus, moveReason || undefined, ticket.version);
     },
     onSuccess: async (ticket) => {
-      queryClient.setQueryData(["ticket", ticket.id], ticket);
+      queryClient.setQueryData(["ticket", ticket.id, userId], ticket);
       onStatusChanged?.(ticket.status);
       setSelectedMove(null);
       setFailedMove(null);
       setFailedError("");
       announce(`${ticket.tracking_code} se actualizó correctamente.`, 3500);
-      await invalidateTicketLists(queryClient);
+      await Promise.all([
+        invalidateTicketLists(queryClient),
+        queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] }),
+      ]);
     },
     onError: async (error, variables) => {
       if (isConflict(error)) {
@@ -317,7 +322,12 @@ function useKanbanMovement(
         setFailedMove(null);
         setFailedError("");
         announce("El ticket cambió en paralelo. Actualizamos el tablero; vuelve a elegir el movimiento.", 6000);
-        await invalidateTicketLists(queryClient);
+        await Promise.all([
+          invalidateTicketLists(queryClient),
+          queryClient.invalidateQueries({
+            queryKey: ["ticket", variables.ticket.id],
+          }),
+        ]);
         return;
       }
       const handledByDialog =
@@ -978,12 +988,34 @@ function TicketWorkCard({
   );
 }
 
+const ticketSlaConcurrencyLimit = 4;
+let activeTicketSlaRequests = 0;
+const ticketSlaRequestQueue: Array<() => void> = [];
+
+async function requestTicketSla(ticketId: string) {
+  if (activeTicketSlaRequests < ticketSlaConcurrencyLimit) {
+    activeTicketSlaRequests += 1;
+  } else {
+    await new Promise<void>((resolve) => ticketSlaRequestQueue.push(resolve));
+  }
+  try {
+    return await api.tickets.sla(ticketId);
+  } finally {
+    const next = ticketSlaRequestQueue.shift();
+    if (next) next();
+    else activeTicketSlaRequests -= 1;
+  }
+}
+
 function TicketSlaSummary({ ticket, role }: { readonly ticket: Ticket; readonly role: KanbanRole }) {
+  const { session } = useAuth();
+  const userId = session?.user.id ?? "";
   const canRead = role === "SUPERVISOR" || ticket.status !== "NUEVO";
   const query = useQuery({
-    queryKey: ["ticket-sla-summary", ticket.id],
-    queryFn: () => api.tickets.sla(ticket.id),
-    enabled: canRead,
+    queryKey: ["ticket", ticket.id, userId, "sla"],
+    queryFn: () => requestTicketSla(ticket.id),
+    enabled: canRead && Boolean(userId),
+    staleTime: 30_000,
     retry: false,
   });
   if (!canRead) return <p className="staff-rework-card__sla"><Clock3 aria-hidden="true" />SLA disponible al tomar el ticket</p>;
