@@ -371,8 +371,7 @@ test("Asesor toma un ticket disponible con take y expected_version", async ({ pa
   await page.getByRole("button", { name: "Tomar ticket" }).click();
   await expect.poll(() => mock.mutations.find((item) => item.path === `/api/v1/tickets/${newTicketId}/take`)?.body).toEqual({ expected_version: 2 });
   await expect(page.locator("#staff-stage-tab-NUEVO")).toContainText("0");
-  await page.locator("#staff-stage-tab-ASIGNADO").click();
-  await expect(page.getByRole("heading", { name: "Consultar una transferencia" })).toBeVisible();
+  await expect(page.locator("#staff-stage-panel-ASIGNADO").getByRole("heading", { name: "Consultar una transferencia" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Abrir detalle GNB-E2E-001" })).toBeVisible();
   expect(mock.unhandledMutations).toEqual([]);
 });
@@ -402,8 +401,7 @@ test("Supervisor inicia en Kanban y asigna usando la ruta versionada", async ({ 
   const assignment = mock.mutations.find((item) => item.path === `/api/v1/tickets/${newTicketId}/assignments`);
   expect(assignment?.body).toEqual({ advisor_id: advisorId, expected_version: 2 });
   await expect(page.locator("#staff-stage-tab-NUEVO")).toContainText("0");
-  await page.locator("#staff-stage-tab-ASIGNADO").click();
-  await expect(page.getByRole("heading", { name: "Consultar una transferencia" })).toBeVisible();
+  await expect(page.locator("#staff-stage-panel-ASIGNADO").getByRole("heading", { name: "Consultar una transferencia" })).toBeVisible();
   expect(mock.unhandledMutations).toEqual([]);
 });
 
@@ -436,7 +434,7 @@ test("Asesor responsable libera un ticket con motivo y versión actual", async (
   mock.setAssignedTicket(ticketFixture({ status: "RESUELTO", resolved_at: "2026-11-05T15:00:00Z", version: 11 }));
 
   await page.goto("/asesor/panel");
-  await page.locator("#staff-stage-tab-RESUELTO").click();
+  await expect(page.locator("#staff-stage-panel-RESUELTO")).toBeVisible();
   await page.getByLabel("Mover a… para GNB-E2E-101").selectOption("NUEVO");
   const releaseDialog = page.getByRole("dialog", { name: "Liberar ticket" });
   await releaseDialog.getByLabel("Motivo de liberación").fill("Debe revisarlo otro asesor.");
@@ -452,14 +450,12 @@ test("Asesor mueve ASIGNADO a EN_PROCESO con la versión del ticket", async ({ p
   test.skip(testInfo.project.name !== "desktop", "transición ordinaria verificada una vez en desktop");
   const mock = await installMockApp(page, "ASESOR");
   await page.goto("/asesor/panel");
-  await page.locator("#staff-stage-tab-ASIGNADO").click();
-  const movement = page.getByLabel("Mover a… para GNB-E2E-101");
+  const movement = page.locator("#staff-stage-panel-ASIGNADO").getByLabel("Mover a… para GNB-E2E-101");
   await movement.focus();
   await movement.press("ArrowDown");
   await expect.poll(() => mock.mutations.find((item) => item.path === `/api/v1/tickets/${assignedTicketId}/status`)?.body).toEqual({ status: "EN_PROCESO", expected_version: 4 });
   await expect.poll(() => mock.assigned.status).toBe("EN_PROCESO");
-  await page.locator("#staff-stage-tab-EN_PROCESO").click();
-  await expect(page.getByRole("heading", { name: "Revisión de una operación" })).toBeVisible();
+  await expect(page.locator("#staff-stage-panel-EN_PROCESO").getByRole("heading", { name: "Revisión de una operación" })).toBeVisible();
   expect(mock.unhandledMutations).toEqual([]);
 });
 
@@ -540,7 +536,6 @@ test("el fallo de red conserva la etapa y permite reintentar el movimiento", asy
   });
 
   await page.goto("/asesor/panel");
-  await page.locator("#staff-stage-tab-ASIGNADO").click();
   const card = page.locator("#staff-stage-panel-ASIGNADO .staff-ticket-card--redesign");
   await page.getByLabel("Mover a… para GNB-E2E-101").selectOption("EN_PROCESO");
   await expect(card.getByRole("alert").filter({ hasText: "No pudimos conectar con el servicio" })).toBeVisible();
@@ -571,7 +566,6 @@ test("un conflicto 409 refresca el tablero y no reintenta el movimiento", async 
   });
 
   await page.goto("/asesor/panel");
-  await page.locator("#staff-stage-tab-ASIGNADO").click();
   const operationListRequestsBeforeMove = mock.requests.filter((item) => item.method === "GET" && item.path === "/api/v1/tickets/operations").length;
   await page.getByLabel("Mover a… para GNB-E2E-101").selectOption("EN_PROCESO");
   await expect(page.getByRole("status").filter({ hasText: "El ticket cambió en paralelo. Actualizamos el tablero" })).toBeVisible();
@@ -797,8 +791,13 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
     await advisorPage.setViewportSize(viewport);
     await page.goto("/supervisor/cola");
     await expect(page.getByRole("heading", { name: "Cola de atención" })).toBeVisible();
-    await expect(page.locator("#staff-stage-tab-NUEVO")).toBeVisible();
-    if (viewport.width <= 1100) await expect(page.locator("#staff-stage-panel-ASIGNADO")).toBeHidden();
+    if (viewport.width <= 1100) {
+      await expect(page.locator("#staff-stage-tab-NUEVO")).toBeVisible();
+      await expect(page.locator("#staff-stage-panel-ASIGNADO")).toBeHidden();
+    } else {
+      await expect(page.locator("#staff-stage-tab-NUEVO")).toBeHidden();
+      await expect(page.locator("#staff-stage-panel-ASIGNADO")).toBeVisible();
+    }
     const boardDimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
     expect(boardDimensions.content).toBeLessThanOrEqual(boardDimensions.viewport + 1);
     await capturePage(page, `staff-board-${viewport.name}`);

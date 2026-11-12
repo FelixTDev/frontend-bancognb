@@ -584,3 +584,77 @@ test("el widget no sugiere consultas de saldos ni movimientos", async ({ page })
   const panel = page.locator(".assistant-panel--widget");
   await expect(panel.getByText(/saldo|movimientos|OTP|operaciones bancarias/i)).toHaveCount(0);
 });
+
+test("presenta temas, FAQ e indicador de respuesta sin desbordar", async ({ page }, testInfo) => {
+  const consoleErrors: string[] = [];
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+
+  const mock = await openAssistant(page, false);
+  const panel = page.getByRole("dialog", { name: "Asistente GNB" });
+  await expect(panel.getByRole("heading", { name: "¿Qué necesitas resolver hoy?" })).toBeVisible();
+  await expect(panel.getByRole("group", { name: "Temas de atención" }).getByRole("button")).toHaveCount(4);
+
+  const faq = panel.locator("details.assistant-faq-suggestions");
+  await faq.locator("summary").click();
+  await expect(faq.locator(".assistant-examples").getByRole("button")).toHaveCount(4);
+  await faq.locator("summary").click();
+  await expect(faq.locator(".assistant-examples")).toBeHidden();
+
+  const welcomeDimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(welcomeDimensions.content).toBeLessThanOrEqual(welcomeDimensions.viewport + 1);
+  await page.screenshot({
+    path: testInfo.outputPath(`assistant-welcome-${testInfo.project.name}.png`),
+    animations: "disabled",
+  });
+
+  await page.route("**/api/v1/chat/conversations/*/messages", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await page.waitForTimeout(700);
+    await route.fallback();
+  });
+  await panel.getByRole("button", { name: "Tarjetas" }).click();
+  await expect(panel.getByText("Preparando una respuesta", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Respuesta estructurada del asistente.")).toBeVisible();
+  expect(mock.messageBodies).toEqual(["Necesito ayuda con una tarjeta."]);
+  expect(mock.unhandledMutations).toEqual([]);
+
+  const dimensions = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("un 401 en el chat público permite reintentar sin avisar que venció una sesión", async ({ page }) => {
+  const mock = await openAssistant(page, false);
+  mock.setResponder(() => ({
+    status: 401,
+    payload: { code: "UNAUTHORIZED", message: "No autorizado.", request_id: "public-401" },
+  }));
+
+  await sendMessage(page, "Necesito orientación.");
+  await expect(page.getByRole("alert")).toContainText("El asistente no pudo atender esta consulta");
+  await expect(page.getByRole("alert")).not.toContainText("Tu sesión venció");
+  await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
+test("un 401 en el chat autenticado informa que la sesión venció", async ({ page }) => {
+  const mock = await openAssistant(page);
+  mock.setResponder(() => ({
+    status: 401,
+    payload: { code: "UNAUTHORIZED", message: "No autorizado.", request_id: "authenticated-401" },
+  }));
+
+  await sendMessage(page, "Necesito orientación.");
+  await expect(page).toHaveURL(/\/ingresar$/);
+  await expect(page.getByText(/Tu sesión venció\. Inicia sesión para retomar esta conversación/)).toBeVisible();
+  expect(mock.unhandledMutations).toEqual([]);
+});

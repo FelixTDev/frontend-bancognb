@@ -11,6 +11,7 @@ import {
   Search,
   TableProperties,
   UserCheck,
+  UserRoundPlus,
   X,
 } from "lucide-react";
 import {
@@ -949,7 +950,7 @@ function TicketWorkCard({
               isLoading={isUpdating}
               onClick={() => movement.requestMove(ticket, "ASIGNADO")}
             >
-              <UserCheck aria-hidden="true" />Tomar ticket
+              <UserRoundPlus aria-hidden="true" />Tomar ticket
             </Button>
             <span className="staff-ticket-card__drag-hint" aria-hidden="true" title="Arrastra desde cualquier espacio libre de la tarjeta"><GripVertical /></span>
           </div>

@@ -59,6 +59,35 @@ export interface AssistantReplyPresentation {
 
 export type AssistantRequestContext = "conversation" | "ticket";
 
+const assistantCategoryLabels: Record<string, string> = {
+  TARJETAS: "tarjetas",
+  CUENTAS: "cuentas",
+  BANCA_DIGITAL: "banca digital",
+  CREDITOS: "créditos",
+  RECLAMOS_SIMPLES: "reclamos",
+};
+
+const assistantCategoryTokenPattern =
+  /\b(?:TARJETAS|CUENTAS|BANCA_DIGITAL|CREDITOS|RECLAMOS_SIMPLES)(?:\s*,\s*(?:TARJETAS|CUENTAS|BANCA_DIGITAL|CREDITOS|RECLAMOS_SIMPLES))*\b/giu;
+
+/** Presents database category keys as conversational Spanish labels. */
+export function formatAssistantMessage(content: string): string {
+  return content
+    .replace(assistantCategoryTokenPattern, (list) => {
+      const labels = list
+        .split(/\s*,\s*/u)
+        .map((token) => assistantCategoryLabels[token.toLocaleUpperCase("es-PE")]);
+      if (labels.length < 2) return labels[0] ?? list;
+      return `${labels.slice(0, -1).join(", ")} y ${labels.at(-1)}`;
+    })
+    .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/gu, (token) =>
+      token
+        .split("_")
+        .map((word) => word.toLocaleLowerCase("es-PE"))
+        .join(" "),
+    );
+}
+
 const ticketDraftFieldLabels: Record<ChatbotTicketDraftField, string> = {
   CATEGORY_ID: "Categoría",
   SUBJECT: "Asunto",
@@ -114,12 +143,15 @@ export function getAssistantRequestErrorMessage(
   status: number,
   context: AssistantRequestContext,
   backendMessage?: string,
+  authenticated = true,
 ): string {
   if (status === 0) {
     return "No pudimos conectar con el servicio. Revisa tu conexión e inténtalo nuevamente.";
   }
   if (status === 401) {
-    return "Tu sesión venció. Inicia sesión de nuevo para continuar.";
+    return authenticated
+      ? "Tu sesión venció. Inicia sesión de nuevo para continuar."
+      : "El asistente no pudo atender esta consulta. Inténtalo nuevamente.";
   }
   if (status === 403) {
     return "No tienes permisos para completar esta operación.";

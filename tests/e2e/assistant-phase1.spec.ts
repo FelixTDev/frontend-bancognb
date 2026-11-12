@@ -559,14 +559,14 @@ test("reinicia en una conversación nueva y tras recargar solo recupera su histo
   await page.goto("/app/asistente");
   await expect(page.getByText("Historial anterior que debe conservarse")).toBeVisible();
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
-  await expect(page.getByText("¿En qué podemos orientarte?")).toBeVisible();
+  await expect(page.getByText("¿Qué necesitas resolver hoy?")).toBeVisible();
   expect(
     await page.evaluate(() =>
       sessionStorage.getItem("gnb.chat.conversation.v1"),
     ),
   ).toBe("new-conversation");
   await page.reload();
-  await expect(page.getByText("¿En qué podemos orientarte?")).toBeVisible();
+  await expect(page.getByText("¿Qué necesitas resolver hoy?")).toBeVisible();
   await expect(page.getByText("Historial anterior que debe conservarse")).toHaveCount(0);
   expect(fetched).toEqual(["old-conversation", "new-conversation"]);
   expect(creates).toBe(1);
@@ -614,8 +614,8 @@ test("si falla el reinicio conserva la conversación y permite reintentarlo", as
     ),
   ).toBe("recoverable-conversation");
 
-  await page.getByRole("button", { name: "Intentar nuevamente" }).click();
-  await expect(page.getByText("¿En qué podemos orientarte?")).toBeVisible();
+  await page.getByRole("button", { name: "Iniciar una conversación nueva" }).click();
+  await expect(page.getByText("¿Qué necesitas resolver hoy?")).toBeVisible();
   expect(creates).toBe(2);
   expect(unhandled).toEqual([]);
 });

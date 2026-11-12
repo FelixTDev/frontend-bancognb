@@ -489,7 +489,7 @@ test("restaura un borrador y reiniciar la conversación nunca lo convierte", asy
   ).toBeVisible();
   expect(mock.conversionPayloads).toHaveLength(0);
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
-  await expect(page.getByRole("heading", { name: "¿En qué podemos orientarte?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "¿Qué necesitas resolver hoy?" })).toBeVisible();
   expect(mock.createdConversations).toBe(1);
   expect(mock.conversionPayloads).toHaveLength(0);
   expect(mock.unhandledMutations).toEqual([]);

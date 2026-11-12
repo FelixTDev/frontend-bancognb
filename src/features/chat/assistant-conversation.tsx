@@ -3,13 +3,17 @@ import {
   AlertTriangle,
   Bot,
   Check,
-  CornerUpLeft,
+  ChevronDown,
+  ChevronRight,
+  CreditCard,
   ExternalLink,
+  Landmark,
   Link2,
-  MessageCircleQuestion,
+  MessageCircleMore,
   RefreshCw,
   RotateCcw,
   Send,
+  Smartphone,
   ThumbsDown,
   ThumbsUp,
   UserRound,
@@ -36,6 +40,7 @@ import {
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
   getAssistantRequestErrorMessage,
+  formatAssistantMessage,
   ticketDraftCorrectionMessage,
   type ReadyTicketDraftPayload,
 } from "./assistant-conversation.model";
@@ -54,6 +59,29 @@ const exampleQuestions = [
   "¿Qué requisitos necesito para solicitar una tarjeta?",
   "¿Qué hago si mi tarjeta está bloqueada?",
   "¿Cómo solicito un estado de cuenta?",
+] as const;
+
+const assistantTopics = [
+  {
+    label: "Tarjetas",
+    prompt: "Necesito ayuda con una tarjeta.",
+    Icon: CreditCard,
+  },
+  {
+    label: "Cuentas",
+    prompt: "Necesito ayuda con una cuenta.",
+    Icon: Landmark,
+  },
+  {
+    label: "Banca digital",
+    prompt: "Necesito ayuda con la banca digital.",
+    Icon: Smartphone,
+  },
+  {
+    label: "Créditos y reclamos",
+    prompt: "Necesito ayuda con un crédito o un reclamo.",
+    Icon: MessageCircleMore,
+  },
 ] as const;
 
 type AssistantTicketCard = NonNullable<
@@ -95,6 +123,7 @@ const toTranscript = (messages: readonly VisibleMessage[]): string =>
 const errorDetails = (
   error: unknown,
   context: "conversation" | "ticket" = "conversation",
+  authenticated = true,
 ) => {
   if (error instanceof ApiError) {
     return {
@@ -102,12 +131,13 @@ const errorDetails = (
         error.status,
         context,
         error.message,
+        authenticated,
       ),
       requestId: error.requestId,
     };
   }
   return {
-    message: getAssistantRequestErrorMessage(-1, context),
+    message: getAssistantRequestErrorMessage(-1, context, undefined, authenticated),
     requestId: null,
   };
 };
@@ -501,7 +531,14 @@ export function AssistantConversation({
           removeActiveConversationId();
           clearPendingTicketConversion();
         } else {
-          setError(errorDetails(restoreError, "conversation"));
+          setError(errorDetails(restoreError, "conversation", authenticated));
+          if (
+            !authenticated &&
+            restoreError instanceof ApiError &&
+            restoreError.status === 401
+          ) {
+            setFailedReset(true);
+          }
         }
       } finally {
         if (active) setRestoring(false);
@@ -514,7 +551,33 @@ export function AssistantConversation({
 
   useEffect(() => {
     const element = messagesRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
+    if (!element) return;
+
+    const latestVisibleMessage = messages[messages.length - 1];
+    const latestReplyElement = element.querySelector<HTMLElement>(
+      "[data-latest-reply='true']",
+    );
+    if (
+      lastReply &&
+      latestVisibleMessage?.id === lastReply.bot_message.id &&
+      latestReplyElement
+    ) {
+      const scrollport = element.getBoundingClientRect();
+      const reply = latestReplyElement.getBoundingClientRect();
+      const topPadding = Number.parseFloat(getComputedStyle(element).paddingTop) || 0;
+      const replyTop =
+        element.scrollTop +
+        reply.top -
+        (scrollport.top + element.clientTop + topPadding);
+      const bottomScrollTop = element.scrollHeight - element.clientHeight;
+
+      if (replyTop < bottomScrollTop) {
+        element.scrollTop = Math.max(0, replyTop + topPadding / 2);
+        return;
+      }
+    }
+
+    element.scrollTop = element.scrollHeight;
   }, [messages, error, lastReply]);
 
   const chat = useMutation({
@@ -568,7 +631,7 @@ export function AssistantConversation({
       setFeedback(null);
     },
     onError: (mutationError, variables) => {
-      setError(errorDetails(mutationError, "conversation"));
+      setError(errorDetails(mutationError, "conversation", authenticated));
       setFailedPrompt(variables.content);
     },
   });
@@ -608,7 +671,7 @@ export function AssistantConversation({
     },
     onSuccess: (_response, isHelpful) => setFeedback(isHelpful),
     onError: (mutationError) =>
-      setError(errorDetails(mutationError, "conversation")),
+      setError(errorDetails(mutationError, "conversation", authenticated)),
   });
 
   const escalate = useMutation({
@@ -626,7 +689,7 @@ export function AssistantConversation({
       );
     },
     onError: (mutationError) =>
-      setError(errorDetails(mutationError, "conversation")),
+      setError(errorDetails(mutationError, "conversation", authenticated)),
   });
 
   const ticketConversion = useMutation({
@@ -662,7 +725,7 @@ export function AssistantConversation({
     onError: (mutationError, payload) => {
       const status =
         mutationError instanceof ApiError ? mutationError.status : -1;
-      setError(errorDetails(mutationError, "ticket"));
+      setError(errorDetails(mutationError, "ticket", authenticated));
       setRetryTicketPayload(
         status === 0 || status === 429 || status >= 500 ? payload : null,
       );
@@ -739,10 +802,10 @@ export function AssistantConversation({
           <Bot />
         </span>
         <div>
-          <strong>Asistente de atención</strong>
+          <strong>Asistente GNB</strong>
           <small>
             {chat.isPending
-              ? "Buscando una respuesta"
+              ? "Preparando una respuesta…"
               : isRestoring
                 ? "Recuperando conversación"
                 : "Orientación digital"}
@@ -762,57 +825,329 @@ export function AssistantConversation({
         </Button>
       </header>
 
-      <div className="assistant-messages" ref={messagesRef} aria-live="polite">
+      <div
+        className="assistant-messages"
+        ref={messagesRef}
+        role="log"
+        aria-label="Conversación con el asistente"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-atomic="false"
+        tabIndex={0}
+      >
         {messages.length ? (
-          messages.map((message) => (
-            <article
-              key={message.id}
-              className={`assistant-message assistant-message--${message.sender}`}
-            >
-              <span aria-hidden="true">
-                {message.sender === "bot" ? <Bot /> : <UserRound />}
-              </span>
-              <p>{message.content}</p>
-            </article>
-          ))
+          messages.map((message, messageIndex) => {
+            const isLatestReply =
+              message.sender === "bot" &&
+              messageIndex === messages.length - 1 &&
+              message.id === lastReply?.bot_message.id;
+
+            return (
+              <article
+                key={`${message.id}-${messageIndex}`}
+                className={`assistant-message assistant-message--${message.sender}`}
+                data-latest-reply={isLatestReply ? "true" : undefined}
+              >
+                <span
+                  className={`assistant-message__avatar assistant-message__avatar--${message.sender}`}
+                  aria-hidden="true"
+                >
+                  {message.sender === "bot" ? <Bot /> : <UserRound />}
+                </span>
+                <div className="assistant-message__body">
+                  <p>
+                    {message.sender === "bot"
+                      ? formatAssistantMessage(message.content)
+                      : message.content}
+                  </p>
+                  {isLatestReply ? (
+                    <div className="assistant-message__details">
+                      {replyPresentation?.needsClarification ? (
+                        <div className="assistant-clarification">
+                          <strong>
+                            {lastReply?.clarification_options?.length
+                              ? "Para orientarte mejor, elige una opción:"
+                              : "Para orientarte mejor, aclara un poco tu consulta."}
+                          </strong>
+                          {lastReply?.clarification_options?.length ? (
+                            <div>
+                              {lastReply.clarification_options.map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  disabled={isRestoring || chat.isPending}
+                                  onClick={() => submit(option)}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {ticketDraft ||
+                      conversation?.converted_ticket ||
+                      conversation?.status === "CONVERTED_TO_TICKET" ? (
+                        <AssistantTicketDraft
+                          conversationStatus={conversation?.status}
+                          draft={ticketDraft}
+                          convertedTicket={conversation?.converted_ticket}
+                          categories={categories.data}
+                          categoriesLoading={categories.isLoading}
+                          categoriesError={categories.isError}
+                          authenticated={authenticated}
+                          chatPending={chat.isPending}
+                          conversionPending={ticketConversion.isPending}
+                          conversionRetryAvailable={Boolean(retryTicketPayload)}
+                          conversionConflict={conversionConflict}
+                          onRequireAuth={() => {
+                            if (conversation) {
+                              saveActiveConversationId(conversation.id);
+                            }
+                          }}
+                          onSelectCategory={(id, name) =>
+                            submit(
+                              `Selecciono la categoría ${formatCategoryDisplayName(name)} (${id}).`,
+                            )
+                          }
+                          onCorrect={(body, categoryName) =>
+                            submit(ticketDraftCorrectionMessage(body, categoryName))
+                          }
+                          onCancel={() =>
+                            submit("Cancela el borrador del ticket. No deseo continuar con su creación.")
+                          }
+                          onConfirm={confirmTicket}
+                          onRetry={retryTicketConversion}
+                        />
+                      ) : null}
+
+                      {ticketQueryPresentation ? (
+                        <AssistantTicketQueryResult
+                          key={lastReply?.bot_message.id}
+                          presentation={ticketQueryPresentation}
+                          disabled={isRestoring || chat.isPending}
+                          onRequestPage={(page) =>
+                            submit(`Muéstrame mis tickets recientes página ${page}`)
+                          }
+                          onSubmitTicketCode={(code) => submit(code)}
+                        />
+                      ) : null}
+
+                      {lastReply?.sources?.length ? (
+                        <section
+                          className="assistant-sources"
+                          aria-label="Fuentes consultadas"
+                        >
+                          <h3>Fuentes consultadas</h3>
+                          <ul>
+                            {lastReply.sources.map((source, index) => {
+                              const href = safeSourceUrl(source.url);
+                              const verifiedAt = sourceVerificationLabel(
+                                source.verified_at,
+                              );
+                              return (
+                                <li
+                                  key={`${source.title}-${source.url ?? "source"}-${index}`}
+                                >
+                                  <div className="assistant-source__details">
+                                    {href ? (
+                                      <a
+                                        href={href}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                      >
+                                        <span>{source.title}</span>
+                                        <ExternalLink aria-hidden="true" />
+                                        <span className="sr-only">
+                                          {" "}(abre en una pestaña nueva)
+                                        </span>
+                                      </a>
+                                    ) : (
+                                      <strong>{source.title}</strong>
+                                    )}
+                                    {source.category ? (
+                                      <span className="assistant-source__category">
+                                        {formatCategoryDisplayName(source.category)}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {verifiedAt ? <small>{verifiedAt}</small> : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
+                      ) : null}
+
+                      {lastReply ? (
+                        <div className="assistant-reply-actions">
+                          <span>¿Te ayudó esta respuesta?</span>
+                          <button
+                            type="button"
+                            aria-label="La respuesta fue útil"
+                            aria-pressed={feedback === true}
+                            disabled={feedbackMutation.isPending}
+                            onClick={() => feedbackMutation.mutate(true)}
+                          >
+                            <ThumbsUp aria-hidden="true" /> Sí
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="La respuesta no fue útil"
+                            aria-pressed={feedback === false}
+                            disabled={feedbackMutation.isPending}
+                            onClick={() => feedbackMutation.mutate(false)}
+                          >
+                            <ThumbsDown aria-hidden="true" /> No
+                          </button>
+                          {feedback !== null ? (
+                            <small>
+                              <Check aria-hidden="true" /> Gracias por tu opinión.
+                            </small>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {conversation &&
+                      lastReply &&
+                      (replyPresentation?.canRequestFollowup ||
+                        (legacyTicketOffer && authenticated && onConvert)) ? (
+                        <div className="assistant-followup">
+                          {replyPresentation?.canRequestFollowup ? (
+                            <Button
+                              variant="quiet"
+                              disabled={escalate.isPending}
+                              isLoading={escalate.isPending}
+                              onClick={() => escalate.mutate()}
+                            >
+                              <Link2 aria-hidden="true" /> Solicitar seguimiento
+                            </Button>
+                          ) : null}
+                          {legacyTicketOffer && authenticated && onConvert ? (
+                            <Button
+                              onClick={() => {
+                                prepareTicketConversionReturn(conversation.id);
+                                onConvert(conversation, transcript);
+                              }}
+                            >
+                              Convertir en solicitud
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {conversation && legacyTicketOffer && !authenticated ? (
+                        <div className="assistant-auth-prompt">
+                          <strong>
+                            ¿Quieres convertir esta conversación en solicitud?
+                          </strong>
+                          <p>
+                            Ingresa o crea una cuenta para continuar con esta
+                            conversación.
+                          </p>
+                          <div>
+                            <Link
+                              to="/ingresar?returnTo=%2Fapp%2Fasistente"
+                              onClick={() =>
+                                prepareTicketConversionReturn(conversation.id)
+                              }
+                            >
+                              Iniciar sesión
+                            </Link>
+                            <Link
+                              to="/registro?returnTo=%2Fapp%2Fasistente"
+                              onClick={() =>
+                                prepareTicketConversionReturn(conversation.id)
+                              }
+                            >
+                              Registrarme
+                            </Link>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {escalationMessage ? (
+                        <p className="assistant-escalation" role="status">
+                          {escalationMessage}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })
         ) : (
           <div className="assistant-welcome">
-            <span aria-hidden="true">
-              <MessageCircleQuestion />
-            </span>
-            <div>
-              <h2>¿En qué podemos orientarte?</h2>
-              <p>Escribe tu consulta o elige una pregunta frecuente.</p>
+            <div className="assistant-welcome__intro">
+              <span aria-hidden="true">
+                <Bot />
+              </span>
+              <div>
+                <h2>¿Qué necesitas resolver hoy?</h2>
+                <p>
+                  Hola, soy el asistente GNB. Elige un tema o cuéntame qué
+                  necesitas.
+                </p>
+              </div>
             </div>
-            <div className="assistant-examples" aria-label="Consultas frecuentes">
-              {exampleQuestions.map((question) => (
+            <div className="assistant-topic-grid" role="group" aria-label="Temas de atención">
+              {assistantTopics.map(({ label, prompt, Icon }) => (
                 <button
                   type="button"
-                  key={question}
+                  key={label}
                   disabled={isRestoring || chat.isPending}
-                  onClick={() => submit(question)}
+                  onClick={() => submit(prompt)}
                 >
-                  {question}
-                  <CornerUpLeft aria-hidden="true" />
+                  <Icon aria-hidden="true" />
+                  <span>{label}</span>
+                  <ChevronRight aria-hidden="true" />
                 </button>
               ))}
             </div>
+            <details className="assistant-faq-suggestions">
+              <summary>
+                Preguntas frecuentes
+                <ChevronDown aria-hidden="true" />
+              </summary>
+              <div className="assistant-examples">
+                {exampleQuestions.map((question) => (
+                  <button
+                    type="button"
+                    key={question}
+                    disabled={isRestoring || chat.isPending}
+                    onClick={() => submit(question)}
+                  >
+                    {question}
+                    <ChevronRight aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </details>
           </div>
         )}
 
         {chat.isPending ? (
-          <article className="assistant-message assistant-message--bot">
-            <span aria-hidden="true">
+          <article className="assistant-message assistant-message--bot assistant-message--typing">
+            <span
+              className="assistant-message__avatar assistant-message__avatar--bot"
+              aria-hidden="true"
+            >
               <Bot />
             </span>
-            <p className="assistant-typing" aria-label="El asistente está respondiendo">
-              <i />
-              <i />
-              <i />
-            </p>
+            <div className="assistant-message__body">
+              <p className="assistant-typing">
+                <span>Preparando una respuesta</span>
+                <span className="assistant-typing__dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </p>
+            </div>
           </article>
         ) : null}
-      </div>
 
       <div className="assistant-statuses">
         {error ? (
@@ -838,37 +1173,14 @@ export function AssistantConversation({
                 isLoading={reset.isPending}
                 onClick={() => reset.mutate()}
               >
-                <RefreshCw aria-hidden="true" /> Intentar nuevamente
+                <RefreshCw aria-hidden="true" /> Iniciar una conversación nueva
               </Button>
             ) : null}
           </div>
         ) : null}
 
-        {lastReply && replyPresentation?.needsClarification ? (
-          <div className="assistant-clarification">
-            <strong>
-              {lastReply.clarification_options?.length
-                ? "Para orientarte mejor, elige una opción:"
-                : "Para orientarte mejor, aclara un poco tu consulta."}
-            </strong>
-            {lastReply.clarification_options?.length ? (
-              <div>
-                {lastReply.clarification_options.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    disabled={isRestoring || chat.isPending}
-                    onClick={() => submit(option)}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {conversation &&
+        {!lastReply &&
+        conversation &&
         (ticketDraft ||
           conversation.converted_ticket ||
           conversation.status === "CONVERTED_TO_TICKET") ? (
@@ -900,135 +1212,7 @@ export function AssistantConversation({
             onRetry={retryTicketConversion}
           />
         ) : null}
-
-        {ticketQueryPresentation ? (
-          <AssistantTicketQueryResult
-            key={lastReply?.bot_message.id}
-            presentation={ticketQueryPresentation}
-            disabled={isRestoring || chat.isPending}
-            onRequestPage={(page) =>
-              submit(`Muéstrame mis tickets recientes página ${page}`)
-            }
-            onSubmitTicketCode={(code) => submit(code)}
-          />
-        ) : null}
-
-        {lastReply?.sources?.length ? (
-          <section className="assistant-sources" aria-label="Fuentes de la respuesta">
-            <h3>Fuentes consultadas</h3>
-            <ul>
-              {lastReply.sources.map((source, index) => {
-                const href = safeSourceUrl(source.url);
-                const verifiedAt = sourceVerificationLabel(source.verified_at);
-                return (
-                  <li key={`${source.title}-${source.url ?? "source"}-${index}`}>
-                    <div>
-                      {href ? (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {source.title}
-                          <ExternalLink aria-hidden="true" />
-                          <span className="sr-only"> (abre en una pestaña nueva)</span>
-                        </a>
-                      ) : (
-                        <strong>{source.title}</strong>
-                      )}
-                      {source.category ? <span>{source.category}</span> : null}
-                    </div>
-                    {verifiedAt ? <small>{verifiedAt}</small> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ) : null}
-
-        {lastReply ? (
-          <div className="assistant-reply-actions">
-            <span>¿Te ayudó esta respuesta?</span>
-            <button
-              type="button"
-              aria-label="La respuesta fue útil"
-              aria-pressed={feedback === true}
-              disabled={feedbackMutation.isPending}
-              onClick={() => feedbackMutation.mutate(true)}
-            >
-              <ThumbsUp aria-hidden="true" /> Sí
-            </button>
-            <button
-              type="button"
-              aria-label="La respuesta no fue útil"
-              aria-pressed={feedback === false}
-              disabled={feedbackMutation.isPending}
-              onClick={() => feedbackMutation.mutate(false)}
-            >
-              <ThumbsDown aria-hidden="true" /> No
-            </button>
-            {feedback !== null ? (
-              <small>
-                <Check aria-hidden="true" /> Gracias por tu opinión.
-              </small>
-            ) : null}
-          </div>
-        ) : null}
-
-        {conversation &&
-        lastReply &&
-        (replyPresentation?.canRequestFollowup ||
-          (legacyTicketOffer && authenticated && onConvert)) ? (
-          <div className="assistant-followup">
-            {replyPresentation?.canRequestFollowup ? (
-              <Button
-                variant="quiet"
-                disabled={escalate.isPending}
-                isLoading={escalate.isPending}
-                onClick={() => escalate.mutate()}
-              >
-                <Link2 aria-hidden="true" /> Solicitar seguimiento
-              </Button>
-            ) : null}
-            {legacyTicketOffer && authenticated && onConvert ? (
-              <Button
-                onClick={() => {
-                  prepareTicketConversionReturn(conversation.id);
-                  onConvert(conversation, transcript);
-                }}
-              >
-                Convertir en solicitud
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {conversation && legacyTicketOffer && !authenticated ? (
-          <div className="assistant-auth-prompt">
-            <strong>¿Quieres convertir esta conversación en solicitud?</strong>
-            <p>Ingresa o crea una cuenta para continuar con esta conversación.</p>
-            <div>
-              <Link
-                to="/ingresar?returnTo=%2Fapp%2Fasistente"
-                onClick={() => prepareTicketConversionReturn(conversation.id)}
-              >
-                Iniciar sesión
-              </Link>
-              <Link
-                to="/registro?returnTo=%2Fapp%2Fasistente"
-                onClick={() => prepareTicketConversionReturn(conversation.id)}
-              >
-                Registrarme
-              </Link>
-            </div>
-          </div>
-        ) : null}
-
-        {escalationMessage ? (
-          <p className="assistant-escalation" role="status">
-            {escalationMessage}
-          </p>
-        ) : null}
+      </div>
       </div>
 
       <form

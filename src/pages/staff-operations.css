@@ -147,6 +147,12 @@
   scrollbar-width: thin;
 }
 
+@media (min-width: 1101px) {
+  .staff-rework-stage-tabs {
+    display: none;
+  }
+}
+
 .staff-rework-stage-tabs button {
   flex: 1 0 0;
   display: flex;
@@ -494,6 +500,13 @@
   min-width: 0;
   padding-inline: 0.5rem;
   font-size: 0.72rem;
+}
+
+.staff-ticket-card__primary-action .button > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .staff-rework-card__actions .staff-ticket-card__movement {
