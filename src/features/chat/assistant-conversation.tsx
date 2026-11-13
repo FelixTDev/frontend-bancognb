@@ -33,6 +33,9 @@ import {
   api,
   type BotMessageResponse,
   type ChatbotConvertedTicketSummary,
+  type ChatbotUI,
+  type ChatbotUIOption,
+  type ChatMessageCreateInput,
   type Conversation,
 } from "../../shared/api/endpoints";
 import { ApiError } from "../../shared/api/http";
@@ -86,6 +89,12 @@ const assistantTopics = [
     Icon: MessageCircleMore,
   },
 ] as const;
+
+interface ChatSubmission {
+  readonly body: ChatMessageCreateInput;
+  readonly displayContent: string;
+  readonly appendUser: boolean;
+}
 
 const endConversationCommands = new Set([
   "salir",
@@ -167,6 +176,49 @@ function AssistantWelcomeMenu({
         </div>
       </details>
     </div>
+  );
+}
+
+const interactiveOptionHeadings: Record<ChatbotUI["type"], string> = {
+  MAIN_MENU: "Elige un tema",
+  FAQ_CATEGORY_CHOICES: "Elige una categoría",
+  FAQ_SUBCATEGORY_CHOICES: "Elige un subtema",
+  FAQ_CHOICES: "Preguntas frecuentes",
+};
+
+function AssistantInteractiveOptions({
+  ui,
+  disabled,
+  onSelect,
+}: {
+  readonly ui: ChatbotUI | null | undefined;
+  readonly disabled: boolean;
+  readonly onSelect: (option: ChatbotUIOption) => void;
+}) {
+  const options = ui?.options ?? [];
+  if (!ui || options.length === 0) return null;
+
+  const heading = interactiveOptionHeadings[ui.type];
+  return (
+    <section
+      className="assistant-interactive-options"
+      aria-label={heading}
+    >
+      <h3>{heading}</h3>
+      <div role="group" aria-label={heading}>
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(option)}
+          >
+            <span>{option.label}</span>
+            <ChevronRight aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -536,7 +588,8 @@ export function AssistantConversation({
   const [messages, setMessages] = useState<readonly VisibleMessage[]>([]);
   const [value, setValue] = useState("");
   const [lastReply, setLastReply] = useState<BotMessageResponse | null>(null);
-  const [failedPrompt, setFailedPrompt] = useState<string | null>(null);
+  const [failedSubmission, setFailedSubmission] =
+    useState<ChatSubmission | null>(null);
   const [failedReset, setFailedReset] = useState(false);
   const [error, setError] = useState<ReturnType<typeof errorDetails> | null>(
     null,
@@ -568,6 +621,7 @@ export function AssistantConversation({
   );
   const queryClient = useQueryClient();
   const ticketDraft = conversation?.ticket_draft ?? lastReply?.ticket_draft;
+  const currentUi = conversation?.ui ?? lastReply?.ui ?? null;
   const terminalConversation = Boolean(
     conversation &&
       ["CLOSED", "EXPIRED", "CONVERTED_TO_TICKET"].includes(
@@ -741,12 +795,10 @@ export function AssistantConversation({
 
   const chat = useMutation({
     mutationFn: async ({
-      content,
+      body,
+      displayContent,
       appendUser,
-    }: {
-      readonly content: string;
-      readonly appendUser: boolean;
-    }) => {
+    }: ChatSubmission) => {
       let activeConversation = conversation;
       if (!activeConversation) {
         activeConversation = await api.chat.create();
@@ -754,17 +806,23 @@ export function AssistantConversation({
         clearPendingTicketConversion();
         setConversation(activeConversation);
       }
-      const response = await api.chat.message(activeConversation.id, content);
-      return { content, appendUser, response, conversation: activeConversation };
+      const response = await api.chat.message(activeConversation.id, body);
+      return {
+        displayContent,
+        appendUser,
+        response,
+        conversation: activeConversation,
+      };
     },
-    onMutate: ({ content, appendUser }) => {
+    onMutate: ({ displayContent, appendUser }) => {
       setError(null);
       setFailedReset(false);
       setEscalationMessage(null);
+      setFailedSubmission(null);
       if (appendUser) {
         setMessages((current) => [
           ...current,
-          { id: crypto.randomUUID(), content, sender: "user" },
+          { id: crypto.randomUUID(), content: displayContent, sender: "user" },
         ]);
         setValue("");
       }
@@ -776,6 +834,7 @@ export function AssistantConversation({
         last_confidence: response.confidence,
         ticket_draft: response.ticket_draft ?? activeConversation.ticket_draft,
         menu_open: response.menu_open ?? false,
+        ui: response.ui ?? null,
       });
       setConversionConflict(false);
       setMessages((current) => [
@@ -787,12 +846,12 @@ export function AssistantConversation({
         },
       ]);
       setLastReply(response);
-      setFailedPrompt(null);
+      setFailedSubmission(null);
       setFeedback(null);
     },
     onError: (mutationError, variables) => {
       setError(errorDetails(mutationError, "conversation", authenticated));
-      setFailedPrompt(variables.content);
+      setFailedSubmission(variables);
     },
   });
 
@@ -804,7 +863,7 @@ export function AssistantConversation({
       setConversation(next);
       setMessages([]);
       setLastReply(null);
-      setFailedPrompt(null);
+      setFailedSubmission(null);
       setFailedReset(false);
       setError(null);
       setFeedback(null);
@@ -816,7 +875,7 @@ export function AssistantConversation({
     },
     onError: () => {
       setFailedReset(true);
-      setFailedPrompt(null);
+      setFailedSubmission(null);
       setError({
         message:
           "No pudimos iniciar una conversación nueva. Tu conversación actual sigue disponible.",
@@ -924,7 +983,33 @@ export function AssistantConversation({
         setLifecycleConfirmation("end");
         return;
       }
-      chat.mutate({ content: normalized, appendUser });
+      chat.mutate({
+        body: { content: normalized },
+        displayContent: normalized,
+        appendUser,
+      });
+    },
+    [chat, isRestoring, reset.isPending, terminalConversation],
+  );
+
+  const submitOption = useCallback(
+    (option: ChatbotUIOption) => {
+      const displayContent = option.label.trim();
+      if (
+        !option.id ||
+        !displayContent ||
+        chat.isPending ||
+        reset.isPending ||
+        isRestoring ||
+        terminalConversation
+      ) {
+        return;
+      }
+      chat.mutate({
+        body: { option_id: option.id },
+        displayContent,
+        appendUser: true,
+      });
     },
     [chat, isRestoring, reset.isPending, terminalConversation],
   );
@@ -932,7 +1017,11 @@ export function AssistantConversation({
   const confirmEndConversation = () => {
     setLifecycleConfirmation(null);
     setValue("");
-    chat.mutate({ content: "salir", appendUser: true });
+    chat.mutate({
+      body: { content: "salir" },
+      displayContent: "salir",
+      appendUser: true,
+    });
   };
 
   const confirmRestartConversation = () => {
@@ -1079,10 +1168,16 @@ export function AssistantConversation({
       </header>
 
       {conversation && !terminalConversation ? (
-        <div className="assistant-lifecycle-controls" aria-label="Acciones de conversación">
+        <div
+          className="assistant-lifecycle-controls"
+          role="group"
+          aria-label="Acciones de conversación"
+        >
+          <span className="assistant-lifecycle-controls__label">Acciones</span>
           {messages.length > 0 && !conversation.menu_open ? (
             <Button
-              variant="secondary"
+              className="assistant-lifecycle-controls__back"
+              variant="primary"
               disabled={isRestoring || chat.isPending || reset.isPending}
               onClick={() => submit("volver al menú")}
             >
@@ -1090,6 +1185,7 @@ export function AssistantConversation({
             </Button>
           ) : null}
           <Button
+            className="assistant-lifecycle-controls__end"
             variant="quiet"
             disabled={isRestoring || chat.isPending || reset.isPending}
             onClick={(event) => {
@@ -1321,6 +1417,12 @@ export function AssistantConversation({
               </article>
             );
           })
+        ) : currentUi?.options?.length ? (
+          <AssistantInteractiveOptions
+            ui={currentUi}
+            disabled={isRestoring || chat.isPending}
+            onSelect={submitOption}
+          />
         ) : (
           <AssistantWelcomeMenu
             disabled={isRestoring || chat.isPending}
@@ -1329,9 +1431,27 @@ export function AssistantConversation({
         )}
 
         {messages.length > 0 && conversation?.menu_open ? (
-          <AssistantWelcomeMenu
-            disabled={isRestoring || chat.isPending}
-            onSubmit={submit}
+          currentUi?.options?.length ? (
+            <AssistantInteractiveOptions
+              ui={currentUi}
+              disabled={isRestoring || chat.isPending || terminalConversation}
+              onSelect={submitOption}
+            />
+          ) : (
+            <AssistantWelcomeMenu
+              disabled={isRestoring || chat.isPending}
+              onSubmit={submit}
+            />
+          )
+        ) : null}
+
+        {messages.length > 0 &&
+        !conversation?.menu_open &&
+        currentUi?.options?.length ? (
+          <AssistantInteractiveOptions
+            ui={currentUi}
+            disabled={isRestoring || chat.isPending || terminalConversation}
+            onSelect={submitOption}
           />
         ) : null}
 
@@ -1385,10 +1505,12 @@ export function AssistantConversation({
                 <small>Referencia: {error.requestId}</small>
               ) : null}
             </div>
-            {failedPrompt ? (
+            {failedSubmission ? (
               <Button
                 variant="secondary"
-                onClick={() => submit(failedPrompt, false)}
+                onClick={() =>
+                  chat.mutate({ ...failedSubmission, appendUser: false })
+                }
               >
                 <RefreshCw aria-hidden="true" /> Reintentar
               </Button>

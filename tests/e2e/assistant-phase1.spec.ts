@@ -33,6 +33,7 @@ function message(id: string, sender: "USER" | "BOT", content: string) {
 function conversation(
   id: string,
   messages: readonly ReturnType<typeof message>[] = [],
+  ui?: unknown,
 ) {
   return {
     id,
@@ -43,6 +44,7 @@ function conversation(
     turn_count: messages.length,
     last_activity_at: "2026-10-10T12:00:00Z",
     messages,
+    ui,
   };
 }
 
@@ -315,6 +317,132 @@ test("muestra el fallback sin fuentes inventadas y permite continuar consultando
     widget.getByText("Puedo ayudarte con otra consulta."),
   ).toBeVisible();
   expect(sent()).toBe(2);
+});
+
+test("muestra opciones del contrato y envía el option_id seleccionado", async ({
+  page,
+}) => {
+  const unhandled = await openAssistant(page, false);
+  const sentBodies: Record<string, unknown>[] = [];
+  await page.route("**/api/v1/chat/conversations", (route) =>
+    fulfillJson(route, 201, conversation(conversationId)),
+  );
+  await page.route(
+    "**/api/v1/chat/conversations/*/messages",
+    async (route) => {
+      sentBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      const current = sentBodies.length - 1;
+      if (current === 1) {
+        await route.abort("failed");
+        return;
+      }
+      await fulfillJson(
+        route,
+        200,
+        current === 0
+          ? reply("ASK_CLARIFICATION", {
+              bot_message: message(
+                "faq-discovery-reply",
+                "BOT",
+                "¿Sobre qué categoría quieres consultar?",
+              ),
+              ui: {
+                type: "FAQ_CATEGORY_CHOICES",
+                menu_id: "faq-discovery",
+                options: [
+                  {
+                    id: "category:00000000-0000-4000-8000-000000000001",
+                    label: "Tarjetas",
+                    action: "SHOW_FAQ_CATEGORY",
+                  },
+                ],
+              },
+            })
+          : reply("NONE", {
+              bot_message: message(
+                "faq-category-reply",
+                "BOT",
+                "Estas son las consultas frecuentes sobre tarjetas.",
+              ),
+              ui: {
+                type: "FAQ_CHOICES",
+                menu_id: "faq:category",
+                options: [
+                  {
+                    id: "faq:00000000-0000-4000-8000-000000000002",
+                    label: "¿Cómo habilito compras por internet?",
+                    action: "SELECT_FAQ",
+                  },
+                ],
+              },
+            }),
+      );
+    },
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "¿Qué consultas puedo hacer?");
+  await widget
+    .getByRole("button", { name: "Tarjetas", exact: true })
+    .click();
+  await widget.getByRole("button", { name: "Reintentar" }).click();
+
+  await expect(
+    widget.getByText("Estas son las consultas frecuentes sobre tarjetas."),
+  ).toBeVisible();
+  await expect(
+    widget.getByRole("button", {
+      name: "¿Cómo habilito compras por internet?",
+    }),
+  ).toBeVisible();
+  expect(sentBodies).toEqual([
+    { content: "¿Qué consultas puedo hacer?" },
+    { option_id: "category:00000000-0000-4000-8000-000000000001" },
+    { option_id: "category:00000000-0000-4000-8000-000000000001" },
+  ]);
+  expect(unhandled).toEqual([]);
+});
+
+test("restaura las opciones interactivas persistidas por el backend", async ({
+  page,
+}) => {
+  const restoredId = "conversation-with-restored-ui";
+  const ui = {
+    type: "FAQ_SUBCATEGORY_CHOICES",
+    menu_id: "faq-category:cards",
+    options: [
+      {
+        id: "subcategory:0123456789abcdef",
+        label: "Compras por internet",
+        action: "SHOW_FAQ_SUBCATEGORY",
+      },
+    ],
+  };
+  await page.addInitScript((id) => {
+    sessionStorage.setItem("gnb.chat.conversation.v1", id);
+  }, restoredId);
+  const unhandled = await installApiGuard(page, { authenticated: false });
+  await page.route(
+    `**/api/v1/chat/conversations/${restoredId}`,
+    (route) =>
+      fulfillJson(
+        route,
+        200,
+        conversation(restoredId, [
+          message("restored-user", "USER", "Quiero consultar sobre tarjetas"),
+          message("restored-bot", "BOT", "Elige un tema para continuar."),
+        ], ui),
+      ),
+  );
+
+  await page.goto("/");
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+
+  await expect(
+    widget.getByRole("button", { name: "Compras por internet" }),
+  ).toBeVisible();
+  expect(unhandled).toEqual([]);
 });
 
 test("solicitar contacto con asesor requiere una acción explícita", async ({

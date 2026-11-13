@@ -13,6 +13,7 @@ import {
 
 const readyDraft: ChatbotTicketDraft = {
   status: "READY_FOR_CONFIRMATION",
+  paused: false,
   fields: {
     category_id: "category-digital",
     subject: "No puedo ingresar a la banca móvil",

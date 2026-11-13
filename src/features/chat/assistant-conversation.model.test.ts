@@ -31,6 +31,7 @@ const makeReply = (
   suggested_action: "NONE",
   requires_clarification: false,
   clarification_options: [],
+  menu_open: false,
   fallback_reason: "LOW_CONFIDENCE",
   conversation_status: "ACTIVE",
   response_source: "FALLBACK",
@@ -163,6 +164,7 @@ describe("assistant ticket query presentation", () => {
       priority_label: "Media",
       updated_at: "2026-10-10T14:30:00Z",
       assigned_advisor_name: null,
+      assignment_status: "ASSIGNED" as const,
     };
     const tickets = [ticket];
     const pagination = { page: 2, page_size: 5, total_pages: 3 };
@@ -224,6 +226,7 @@ describe("assistant ticket query presentation", () => {
       priority_label: "Media",
       updated_at: "2026-10-10T14:30:00Z",
       assigned_advisor_name: null,
+      assignment_status: "ASSIGNED" as const,
     };
 
     expect(

@@ -50,9 +50,15 @@ const AdvisorDashboardPage = page(staffOperationsPages, "AdvisorDashboardPage");
 const AdvisorInboxPage = page(staffOperationsPages, "AdvisorInboxPage");
 const AdvisorHistoryPage = page(staffOperationsPages, "AdvisorHistoryPage");
 const KnowledgePage = page(staffPages, "KnowledgePage");
-const SupervisorDashboardPage = page(staffOperationsPages, "SupervisorDashboardPage");
+const SupervisorDashboardPage = page(
+  staffOperationsPages,
+  "SupervisorDashboardPage",
+);
 const SupervisorQueuePage = page(staffOperationsPages, "SupervisorQueuePage");
-const SupervisorHistoryPage = page(staffOperationsPages, "SupervisorHistoryPage");
+const SupervisorHistoryPage = page(
+  staffOperationsPages,
+  "SupervisorHistoryPage",
+);
 const AssignmentsPage = page(staffOperationsPages, "AssignmentsPage");
 const ContentManagementPage = page(staffPages, "ContentManagementPage");
 const SlaPage = page(staffPages, "SlaPage");
@@ -73,14 +79,14 @@ export const router = createBrowserRouter([
       { path: "terminos", element: <LegalPage type="terms" /> },
     ],
   },
+  { path: "restablecer-acceso", element: <ResetPasswordPage /> },
+  { path: "verificar-cuenta", element: <VerifyAccountPage /> },
   {
     element: <GuestRoute />,
     children: [
       { path: "ingresar", element: <LoginPage /> },
       { path: "registro", element: <RegisterPage /> },
       { path: "recuperar-acceso", element: <ForgotPasswordPage /> },
-      { path: "restablecer-acceso", element: <ResetPasswordPage /> },
-      { path: "verificar-cuenta", element: <VerifyAccountPage /> },
     ],
   },
   { path: "sin-acceso", element: <NoAccessPage /> },

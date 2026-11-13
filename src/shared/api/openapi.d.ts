@@ -1362,11 +1362,20 @@ export interface components {
             requires_clarification: boolean;
             /** Clarification Options */
             clarification_options?: string[];
+            /** @description Clasificación estructurada de la respuesta IA, validada contra el catálogo cerrado. No autoriza operaciones ni reemplaza permisos. */
+            intent_classification?: components["schemas"]["ChatbotIntent"] | null;
+            /** @description Opciones interactivas tipadas. option_id solo se acepta si la opción sigue perteneciendo al estado actual de la conversación. */
+            ui?: components["schemas"]["ChatbotUI"] | null;
             /**
              * @description Acción tipada que la interfaz puede presentar o ejecutar; nunca confirma por sí sola una conversión a ticket. Las acciones de consulta usan ticket_query como payload tipado. CONVERT_TO_TICKET se emite para un borrador listo y pendiente de confirmación explícita mediante el endpoint de conversión.
              * @default NONE
              */
             suggested_action: components["schemas"]["ChatbotSuggestedAction"];
+            /**
+             * Available Actions
+             * @description Acciones alternativas que la interfaz puede ofrecer cuando la consulta no tiene una respuesta confiable o requiere otro canal.
+             */
+            available_actions?: components["schemas"]["ChatbotAvailableAction"][];
             /**
              * @description Resultado acotado de una consulta autenticada de tickets. Se omite para respuestas que no consultan tickets. El tipo de consulta y suggested_action permiten al frontend actuar sin analizar el texto.
              * @example {
@@ -1473,8 +1482,12 @@ export interface components {
             ticket_query?: components["schemas"]["ChatbotTicketQuery"] | null;
             /** @description Borrador estructurado del ticket. Solo READY_FOR_CONFIRMATION permite que la interfaz solicite confirmación en el endpoint de conversión. */
             ticket_draft?: components["schemas"]["ChatbotTicketDraft"];
-            /** @description Indica que la respuesta abrió el menú de temas del asistente. */
-            menu_open?: boolean;
+            /**
+             * Menu Open
+             * @description Indica que la respuesta abrió el menú de temas del asistente.
+             * @default false
+             */
+            menu_open: boolean;
             /** Fallback Reason */
             fallback_reason?: string | null;
             /** @default ACTIVE */
@@ -1572,6 +1585,7 @@ export interface components {
             confidence: number | null;
             /** Faq Id */
             faq_id?: string | null;
+            intent_classification?: components["schemas"]["ChatbotIntent"] | null;
             response_source?: components["schemas"]["ChatbotResponseSource"] | null;
             /**
              * Created At
@@ -1599,6 +1613,11 @@ export interface components {
          * @enum {string}
          */
         ChatbotAuthenticationAction: "LOGIN" | "REGISTER";
+        /**
+         * ChatbotAvailableAction
+         * @enum {string}
+         */
+        ChatbotAvailableAction: "BROWSE_KNOWLEDGE" | "CREATE_TICKET" | "CONTACT_ADVISOR" | "VIEW_MY_TICKETS" | "OFFICIAL_CHANNELS" | "RETRY";
         /** ChatbotConvertedTicketSummary */
         ChatbotConvertedTicketSummary: {
             /**
@@ -1631,6 +1650,11 @@ export interface components {
             generic_replies: number;
         };
         /**
+         * ChatbotIntent
+         * @enum {string}
+         */
+        ChatbotIntent: "GREETING" | "SHOW_MENU" | "FAQ_QUERY" | "FAQ_DISCOVERY" | "FAQ_CATEGORY_DISCOVERY" | "FAQ_SUBCATEGORY_DISCOVERY" | "TICKET_QUERY" | "TICKET_DETAIL" | "CREATE_TICKET" | "TICKET_DRAFT_UPDATE" | "REQUEST_ADVISOR" | "CLARIFICATION" | "NAVIGATION" | "END_CONVERSATION" | "OUT_OF_SCOPE" | "UNKNOWN";
+        /**
          * ChatbotResponseSource
          * @enum {string}
          */
@@ -1651,6 +1675,11 @@ export interface components {
          * @enum {string}
          */
         ChatbotSuggestedAction: "NONE" | "ASK_CLARIFICATION" | "CONVERT_TO_TICKET" | "CONTACT_ADVISOR" | "AUTHENTICATION_REQUIRED" | "LIST_MY_TICKETS" | "COUNT_MY_TICKETS" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "LATEST_ADVISOR_RESPONSE" | "CLIENT_ACTION_REQUIRED" | "CLARIFY_TICKET_CODE" | "SHOW_MENU" | "END_CONVERSATION";
+        /**
+         * ChatbotTicketAssignmentStatus
+         * @enum {string}
+         */
+        ChatbotTicketAssignmentStatus: "ASSIGNED" | "UNASSIGNED";
         /** ChatbotTicketCard */
         ChatbotTicketCard: {
             /**
@@ -1679,13 +1708,18 @@ export interface components {
             updated_at: string;
             /** Assigned Advisor Name */
             assigned_advisor_name?: string | null;
+            assignment_status: components["schemas"]["ChatbotTicketAssignmentStatus"];
         };
         /** ChatbotTicketDraft */
         ChatbotTicketDraft: {
             /** @default INACTIVE */
             status: components["schemas"]["ChatbotTicketDraftStatus"];
-            /** @description Indica que el borrador se conserva mientras el cliente consulta otro tema. */
-            paused?: boolean;
+            /**
+             * Paused
+             * @description Indica que el borrador se conserva mientras el cliente consulta otro tema; no confirma ni crea el ticket.
+             * @default false
+             */
+            paused: boolean;
             fields?: components["schemas"]["ChatbotTicketDraftFields"];
             /** Missing Fields */
             missing_fields?: components["schemas"]["ChatbotTicketDraftField"][];
@@ -1766,6 +1800,32 @@ export interface components {
          * @enum {string}
          */
         ChatbotTicketQueryType: "AUTHENTICATION_REQUIRED" | "TICKET_LIST" | "TICKET_COUNT" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "ADVISOR_REPLY" | "CLIENT_ACTION_REQUIRED" | "LATEST_TICKET" | "CLARIFY_TICKET_CODE";
+        /** ChatbotUI */
+        ChatbotUI: {
+            type: components["schemas"]["ChatbotUIType"];
+            /** Menu Id */
+            menu_id: string;
+            /** Options */
+            options?: components["schemas"]["ChatbotUIOption"][];
+        };
+        /**
+         * ChatbotUIAction
+         * @enum {string}
+         */
+        ChatbotUIAction: "SHOW_FAQ_DISCOVERY" | "SHOW_FAQ_CATEGORY" | "SHOW_FAQ_SUBCATEGORY" | "SELECT_FAQ" | "NAVIGATE_BACK" | "SHOW_MENU" | "CHECK_TICKET_STATUS" | "LIST_MY_TICKETS" | "CREATE_TICKET" | "CONTACT_ADVISOR" | "RESUME_TICKET_DRAFT" | "END_CONVERSATION";
+        /** ChatbotUIOption */
+        ChatbotUIOption: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            action: components["schemas"]["ChatbotUIAction"];
+        };
+        /**
+         * ChatbotUIType
+         * @enum {string}
+         */
+        ChatbotUIType: "MAIN_MENU" | "FAQ_CATEGORY_CHOICES" | "FAQ_SUBCATEGORY_CHOICES" | "FAQ_CHOICES";
         /** CommentCreate */
         CommentCreate: {
             /** Content */
@@ -1843,8 +1903,14 @@ export interface components {
             last_activity_at?: string | null;
             /** @description Estado y campos permitidos del borrador conversacional de ticket. */
             ticket_draft?: components["schemas"]["ChatbotTicketDraft"];
-            /** @description Indica que al restaurar la conversación se debe mostrar el menú de temas. */
-            menu_open?: boolean;
+            /**
+             * Menu Open
+             * @description Indica que el cliente volvió al menú de temas de la conversación.
+             * @default false
+             */
+            menu_open: boolean;
+            /** @description Control interactivo restaurable del estado actual. Sus identificadores solo son válidos en el estado conversacional que los ofreció. */
+            ui?: components["schemas"]["ChatbotUI"] | null;
             /** @description Resumen del ticket asociado; nulo si la conversación no fue convertida. */
             converted_ticket?: components["schemas"]["ChatbotConvertedTicketSummary"] | null;
             /** Messages */
@@ -2245,8 +2311,17 @@ export interface components {
         /** MessageCreate */
         MessageCreate: {
             /** Content */
+            content?: string | null;
+            /**
+             * Option Id
+             * @description Identificador de una opción que el backend ofreció para el estado actual. No ejecuta acciones no presentadas por el servidor.
+             */
+            option_id?: string | null;
+        } & ({
             content: string;
-        };
+        } | {
+            option_id: string;
+        });
         /** MessageResponse */
         MessageResponse: {
             /** Message */

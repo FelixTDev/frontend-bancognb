@@ -46,6 +46,8 @@ export type Conversation = ApiSchemas["ConversationRead"];
 export type BotMessageResponse = ApiSchemas["BotMessageResponse"];
 export type ChatbotSuggestedAction = ApiSchemas["ChatbotSuggestedAction"];
 export type ChatbotSource = ApiSchemas["ChatbotSource"];
+export type ChatbotUI = ApiSchemas["ChatbotUI"];
+export type ChatbotUIOption = ApiSchemas["ChatbotUIOption"];
 export type ChatFeedback = ApiSchemas["ChatFeedbackRead"];
 export type ChatMessageCreateInput = ApiSchemas["MessageCreate"];
 export type TicketCreateInput = ApiSchemas["TicketCreate"];
@@ -192,11 +194,11 @@ export const api = {
       ),
     get: (id: string) =>
       data<Conversation>(http.request(`/chat/conversations/${id}`)),
-    message: (id: string, content: string) =>
+    message: (id: string, body: ChatMessageCreateInput) =>
       data<BotMessageResponse>(
         http.request(`/chat/conversations/${id}/messages`, {
           method: "POST",
-          body: { content },
+          body,
         }),
       ),
     escalate: (id: string, reason: string) =>

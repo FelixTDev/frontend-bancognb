@@ -54,6 +54,7 @@ function makeConversation(
     started_at: "2026-10-10T12:00:00Z",
     ended_at: null,
     turn_count: 0,
+    menu_open: false,
     messages: [],
     ...overrides,
   };
@@ -65,6 +66,7 @@ function makeDraft(
 ): ChatbotTicketDraft {
   return {
     status,
+    paused: false,
     fields: {},
     missing_fields: [],
     validation_errors: [],
@@ -90,6 +92,7 @@ function makeReply(
     clarification_options: [],
     suggested_action: "NONE",
     ticket_draft: draft,
+    menu_open: false,
     conversation_status: "ACTIVE",
     response_source: "DETERMINISTIC",
     sources: [],
@@ -257,7 +260,7 @@ async function installMockApi(page: Page, options: MockOptions = {}) {
       /^\/api\/v1\/chat\/conversations\/[^/]+\/messages$/.test(endpoint)
     ) {
       const messageBody = request.postDataJSON() as ChatMessageCreateInput;
-      const content = messageBody.content;
+      const content = messageBody.content ?? messageBody.option_id ?? "";
       const index = mock.sentMessages.length;
       mock.sentMessages.push(content);
       const response =
@@ -267,6 +270,7 @@ async function installMockApi(page: Page, options: MockOptions = {}) {
         status: response.conversation_status ?? mock.conversation.status,
         ticket_draft: response.ticket_draft ?? mock.conversation.ticket_draft,
         menu_open: response.menu_open ?? mock.conversation.menu_open,
+        ui: response.ui ?? null,
         messages: [
           ...(mock.conversation.messages ?? []),
           response.user_message,
