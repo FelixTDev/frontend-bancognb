@@ -266,6 +266,7 @@ async function installMockApi(page: Page, options: MockOptions = {}) {
         ...mock.conversation,
         status: response.conversation_status ?? mock.conversation.status,
         ticket_draft: response.ticket_draft ?? mock.conversation.ticket_draft,
+        menu_open: response.menu_open ?? mock.conversation.menu_open,
         messages: [
           ...(mock.conversation.messages ?? []),
           response.user_message,
@@ -489,9 +490,123 @@ test("restaura un borrador y reiniciar la conversación nunca lo convierte", asy
   ).toBeVisible();
   expect(mock.conversionPayloads).toHaveLength(0);
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Reiniciar conversación" })
+    .click();
   await expect(page.getByRole("heading", { name: "¿Qué necesitas resolver hoy?" })).toBeVisible();
   expect(mock.createdConversations).toBe(1);
   expect(mock.conversionPayloads).toHaveLength(0);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
+test("muestra el menú sin perder historial y solo reanuda el borrador por acción explícita", async ({
+  page,
+}) => {
+  const mock = await openAssistant(page, {
+    authenticated: true,
+    onMessage: (content) => {
+      if (content === "Necesito registrar una incidencia.") {
+        return makeReply(
+          content,
+          makeDraft("COLLECTING", {
+            fields: { subject: "Falla en banca móvil" },
+            missing_fields: ["CATEGORY_ID", "DESCRIPTION", "PRIORITY"],
+          }),
+        );
+      }
+      if (content === "volver al menú") {
+        return makeReply(
+          content,
+          makeDraft("COLLECTING", {
+            paused: true,
+            fields: { subject: "Falla en banca móvil" },
+            missing_fields: ["CATEGORY_ID", "DESCRIPTION", "PRIORITY"],
+          }),
+          { menu_open: true },
+        );
+      }
+      if (content === "Continúa con mi borrador de ticket") {
+        return makeReply(
+          content,
+          makeDraft("COLLECTING", {
+            fields: { subject: "Falla en banca móvil" },
+            missing_fields: ["CATEGORY_ID", "DESCRIPTION", "PRIORITY"],
+          }),
+          { menu_open: false },
+        );
+      }
+      return makeReply(content);
+    },
+  });
+
+  await sendMessage(page, "Necesito registrar una incidencia.");
+  await expect(page.locator(".assistant-ticket-draft")).toBeVisible();
+  expect(mock.sentMessages).toEqual(["Necesito registrar una incidencia."]);
+
+  await page.getByRole("button", { name: "Volver al menú" }).click();
+  await expect(page.getByRole("group", { name: "Temas de atención" })).toBeVisible();
+  await expect(page.locator(".assistant-draft-paused")).toContainText(
+    "Tu borrador está guardado.",
+  );
+  await expect(
+    page
+      .locator(".assistant-message--user")
+      .filter({ hasText: "Necesito registrar una incidencia." }),
+  ).toBeVisible();
+  expect(mock.sentMessages).toHaveLength(2);
+
+  await page.reload();
+  await expect(page.getByRole("group", { name: "Temas de atención" })).toBeVisible();
+  await expect(page.locator(".assistant-draft-paused")).toBeVisible();
+  expect(mock.sentMessages).toHaveLength(2);
+
+  await page.getByRole("button", { name: "Continuar borrador" }).click();
+  await expect(page.locator(".assistant-ticket-draft")).toBeVisible();
+  await expect(page.locator(".assistant-draft-paused")).toHaveCount(0);
+  expect(mock.sentMessages).toEqual([
+    "Necesito registrar una incidencia.",
+    "volver al menú",
+    "Continúa con mi borrador de ticket",
+  ]);
+  expect(mock.conversionPayloads).toHaveLength(0);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
+test("finalizar pide confirmación, cierra el historial y bloquea mensajes posteriores", async ({
+  page,
+}) => {
+  const mock = await openAssistant(page, {
+    authenticated: true,
+    onMessage: (content) =>
+      makeReply(content, undefined, {
+        bot_message: message("closed-bot", "BOT", "La conversación se cerró."),
+        conversation_status: "CLOSED",
+        suggested_action: "END_CONVERSATION",
+      }),
+  });
+
+  await sendMessage(page, "Salir");
+  const confirmation = page.getByRole("alertdialog");
+  await expect(confirmation).toContainText("No se creará un ticket");
+  expect(mock.sentMessages).toHaveLength(0);
+  await confirmation
+    .getByRole("button", { name: "Finalizar conversación" })
+    .click();
+
+  await expect(page.locator(".assistant-terminal")).toContainText(
+    "no se generó un ticket",
+  );
+  await expect(page.getByRole("textbox", { name: "Escribe tu consulta" })).toHaveCount(0);
+  await expect(page.locator(".assistant-message--user")).toContainText("salir");
+  expect(mock.sentMessages).toEqual(["salir"]);
+  expect(mock.conversation.status).toBe("CLOSED");
+  expect(mock.conversionPayloads).toHaveLength(0);
+
+  await page.reload();
+  await expect(page.locator(".assistant-terminal")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Escribe tu consulta" })).toHaveCount(0);
+  expect(mock.sentMessages).toEqual(["salir"]);
   expect(mock.unhandledMutations).toEqual([]);
 });
 

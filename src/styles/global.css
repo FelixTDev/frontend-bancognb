@@ -4811,9 +4811,10 @@ p {
   display: grid;
   grid-template-areas:
     "head"
+    "controls"
     "messages"
     "composer";
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: #fff;
   border: 1px solid var(--border-subtle);
@@ -4863,6 +4864,26 @@ p {
 }
 .assistant-panel__reset:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+.assistant-lifecycle-controls {
+  grid-area: controls;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: 0 var(--space-5);
+  background: #fff;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.assistant-lifecycle-controls .button {
+  min-height: 36px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+}
+.assistant-lifecycle-controls svg {
+  width: 16px;
+  height: 16px;
 }
 .assistant-messages {
   grid-area: messages;
@@ -5112,6 +5133,89 @@ p {
 }
 .assistant-statuses:empty {
   display: none;
+}
+.assistant-terminal {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  max-width: 44rem;
+  margin: var(--space-3) auto;
+  padding: var(--space-4);
+  color: var(--text-primary);
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--color-gold-500);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.assistant-terminal p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.assistant-terminal .button {
+  margin-top: var(--space-1);
+}
+.assistant-lifecycle-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: rgba(6, 21, 36, 0.62);
+  backdrop-filter: blur(3px);
+}
+.assistant-lifecycle-dialog {
+  width: min(100%, 34rem);
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+  padding: clamp(var(--space-4), 4vw, var(--space-6));
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.assistant-lifecycle-dialog__icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: var(--color-navy-950);
+  background: var(--color-gold-100);
+  border-radius: 50%;
+}
+.assistant-lifecycle-dialog__icon svg {
+  width: 19px;
+  height: 19px;
+}
+.assistant-lifecycle-dialog__copy h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+.assistant-lifecycle-dialog__copy p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.assistant-lifecycle-dialog__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.assistant-lifecycle-dialog__actions .button {
+  min-height: 44px;
+}
+.assistant-lifecycle-dialog button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .assistant-notice,
 .assistant-clarification,
@@ -5889,6 +5993,14 @@ p {
   box-shadow: none;
 }
 .assistant-panel--widget .assistant-panel__head { display: none; }
+.assistant-panel--widget .assistant-lifecycle-controls {
+  min-height: 42px;
+  padding: 0 var(--space-3);
+}
+.assistant-panel--widget .assistant-lifecycle-controls .button {
+  min-height: 34px;
+  font-size: 0.73rem;
+}
 .assistant-panel--widget .assistant-messages { padding: var(--space-3); }
 .assistant-panel--widget .assistant-welcome {
   padding: 0;
@@ -5951,6 +6063,12 @@ p {
   .assistant-panel__head { min-height: 66px; padding: var(--space-2) var(--space-3); }
   .assistant-panel__reset-label { display: none; }
   .assistant-panel__reset { width: 42px; }
+  .assistant-lifecycle-controls { padding: 0 var(--space-3); }
+  .assistant-lifecycle-controls .button { flex: 0 1 auto; }
+  .assistant-lifecycle-dialog { grid-template-columns: 34px minmax(0, 1fr); gap: var(--space-3); }
+  .assistant-lifecycle-dialog__icon { width: 34px; height: 34px; }
+  .assistant-lifecycle-dialog__actions { flex-direction: column-reverse; }
+  .assistant-lifecycle-dialog__actions .button { width: 100%; }
   .assistant-examples,
   .assistant-topic-grid { grid-template-columns: 1fr; }
   .assistant-panel--widget .assistant-topic-grid button { min-height: 54px; }

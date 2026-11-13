@@ -9,6 +9,8 @@ import {
   ExternalLink,
   Landmark,
   Link2,
+  List,
+  LogOut,
   MessageCircleMore,
   RefreshCw,
   RotateCcw,
@@ -22,6 +24,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -83,6 +86,114 @@ const assistantTopics = [
     Icon: MessageCircleMore,
   },
 ] as const;
+
+const endConversationCommands = new Set([
+  "salir",
+  "terminar",
+  "finalizar",
+  "cerrar chat",
+  "cerrar conversacion",
+  "finalizar chat",
+  "finalizar conversacion",
+  "terminar chat",
+  "terminar conversacion",
+  "quiero salir",
+  "quiero terminar",
+  "quiero finalizar",
+  "quiero cerrar",
+  "cerrar",
+]);
+
+function normalizeLifecycleCommand(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es")
+    .trim()
+    .replace(/[.!?,;:¿¡]+$/g, "");
+}
+
+function AssistantWelcomeMenu({
+  disabled,
+  onSubmit,
+}: {
+  readonly disabled: boolean;
+  readonly onSubmit: (prompt: string) => void;
+}) {
+  return (
+    <div className="assistant-welcome">
+      <div className="assistant-welcome__intro">
+        <span aria-hidden="true">
+          <Bot />
+        </span>
+        <div>
+          <h2>¿Qué necesitas resolver hoy?</h2>
+          <p>
+            Hola, soy el asistente GNB. Elige un tema o cuéntame qué necesitas.
+          </p>
+        </div>
+      </div>
+      <div className="assistant-topic-grid" role="group" aria-label="Temas de atención">
+        {assistantTopics.map(({ label, prompt, Icon }) => (
+          <button
+            type="button"
+            key={label}
+            disabled={disabled}
+            onClick={() => onSubmit(prompt)}
+          >
+            <Icon aria-hidden="true" />
+            <span>{label}</span>
+            <ChevronRight aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+      <details className="assistant-faq-suggestions">
+        <summary>
+          Preguntas frecuentes
+          <ChevronDown aria-hidden="true" />
+        </summary>
+        <div className="assistant-examples">
+          {exampleQuestions.map((question) => (
+            <button
+              type="button"
+              key={question}
+              disabled={disabled}
+              onClick={() => onSubmit(question)}
+            >
+              {question}
+              <ChevronRight aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function AssistantPausedDraft({
+  disabled,
+  onResume,
+}: {
+  readonly disabled: boolean;
+  readonly onResume: () => void;
+}) {
+  return (
+    <section className="assistant-draft-paused" role="status">
+      <div>
+        <strong>Tu borrador está guardado.</strong>
+        <p>Cuando quieras, puedes continuar donde lo dejaste.</p>
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={disabled}
+        onClick={onResume}
+      >
+        <RotateCcw aria-hidden="true" /> Continuar borrador
+      </Button>
+    </section>
+  );
+}
 
 type AssistantTicketCard = NonNullable<
   NonNullable<BotMessageResponse["ticket_query"]>["ticket"]
@@ -418,6 +529,9 @@ export function AssistantConversation({
   variant = "page",
   onConvert,
 }: AssistantConversationProps) {
+  const lifecycleId = useId();
+  const lifecycleDialogTitleId = `${lifecycleId}-title`;
+  const lifecycleDialogDescriptionId = `${lifecycleId}-description`;
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<readonly VisibleMessage[]>([]);
   const [value, setValue] = useState("");
@@ -437,7 +551,14 @@ export function AssistantConversation({
   const [retryTicketPayload, setRetryTicketPayload] =
     useState<ReadyTicketDraftPayload | null>(null);
   const [conversionConflict, setConversionConflict] = useState(false);
+  const [lifecycleConfirmation, setLifecycleConfirmation] = useState<
+    "end" | "restart" | null
+  >(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const lifecycleDialogRef = useRef<HTMLElement>(null);
+  const lifecycleCancelRef = useRef<HTMLButtonElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const lifecycleTriggerRef = useRef<HTMLElement | null>(null);
   const conversionInFlightRef = useRef(false);
   const resumedPendingConversionRef = useRef<string | null>(null);
   const linkedConversationIdsRef = useRef(new Set<string>());
@@ -447,6 +568,13 @@ export function AssistantConversation({
   );
   const queryClient = useQueryClient();
   const ticketDraft = conversation?.ticket_draft ?? lastReply?.ticket_draft;
+  const terminalConversation = Boolean(
+    conversation &&
+      ["CLOSED", "EXPIRED", "CONVERTED_TO_TICKET"].includes(
+        conversation.status,
+      ),
+  );
+
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: api.categories.list,
@@ -454,10 +582,41 @@ export function AssistantConversation({
       authenticated &&
       Boolean(
         ticketDraft &&
+          !ticketDraft.paused &&
           ticketDraft.status !== "INACTIVE" &&
           ticketDraft.status !== "CANCELLED",
       ),
   });
+
+  useEffect(() => {
+    if (!lifecycleConfirmation) return;
+    lifecycleCancelRef.current?.focus();
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setLifecycleConfirmation(null);
+        lifecycleTriggerRef.current?.focus();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = lifecycleDialogRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled])",
+      );
+      if (!controls?.length) return;
+      const first = controls.item(0);
+      const last = controls.item(controls.length - 1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [lifecycleConfirmation]);
 
   useEffect(() => {
     const id = getActiveConversationId();
@@ -616,6 +775,7 @@ export function AssistantConversation({
         status: response.conversation_status ?? activeConversation.status,
         last_confidence: response.confidence,
         ticket_draft: response.ticket_draft ?? activeConversation.ticket_draft,
+        menu_open: response.menu_open ?? false,
       });
       setConversionConflict(false);
       setMessages((current) => [
@@ -652,6 +812,7 @@ export function AssistantConversation({
       setRetryTicketPayload(null);
       setConversionConflict(false);
       setValue("");
+      window.requestAnimationFrame(() => composerRef.current?.focus());
     },
     onError: () => {
       setFailedReset(true);
@@ -745,11 +906,51 @@ export function AssistantConversation({
   const submit = useCallback(
     (content: string, appendUser = true) => {
       const normalized = content.trim();
-      if (!normalized || chat.isPending || isRestoring) return;
+      if (
+        !normalized ||
+        chat.isPending ||
+        reset.isPending ||
+        isRestoring ||
+        terminalConversation
+      ) {
+        return;
+      }
+      if (
+        appendUser &&
+        endConversationCommands.has(normalizeLifecycleCommand(normalized))
+      ) {
+        setValue("");
+        lifecycleTriggerRef.current = composerRef.current;
+        setLifecycleConfirmation("end");
+        return;
+      }
       chat.mutate({ content: normalized, appendUser });
     },
-    [chat, isRestoring],
+    [chat, isRestoring, reset.isPending, terminalConversation],
   );
+
+  const confirmEndConversation = () => {
+    setLifecycleConfirmation(null);
+    setValue("");
+    chat.mutate({ content: "salir", appendUser: true });
+  };
+
+  const confirmRestartConversation = () => {
+    setLifecycleConfirmation(null);
+    reset.mutate();
+  };
+
+  const closeLifecycleConfirmation = () => {
+    setLifecycleConfirmation(null);
+    lifecycleTriggerRef.current?.focus();
+  };
+
+  const terminalMessage =
+    conversation?.status === "CLOSED"
+      ? "Esta conversación finalizó. El historial se conserva y no se generó un ticket al cerrarla."
+      : conversation?.status === "EXPIRED"
+        ? "Esta conversación venció. Su historial permanece disponible; inicia una nueva para continuar."
+        : "Esta conversación ya se convirtió en una solicitud. Puedes consultar su detalle o iniciar otra conversación.";
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -794,8 +995,57 @@ export function AssistantConversation({
   const retryTicketConversion = () => {
     if (retryTicketPayload) confirmTicket(retryTicketPayload);
   };
+  const renderTicketDraft = () => {
+    if (ticketDraft?.paused && !conversation?.converted_ticket) {
+      return (
+        <AssistantPausedDraft
+          disabled={isRestoring || chat.isPending}
+          onResume={() => submit("Continúa con mi borrador de ticket")}
+        />
+      );
+    }
+    if (
+      !ticketDraft &&
+      !conversation?.converted_ticket &&
+      conversation?.status !== "CONVERTED_TO_TICKET"
+    ) {
+      return null;
+    }
+    return (
+      <AssistantTicketDraft
+        conversationStatus={conversation?.status}
+        draft={ticketDraft}
+        convertedTicket={conversation?.converted_ticket}
+        categories={categories.data}
+        categoriesLoading={categories.isLoading}
+        categoriesError={categories.isError}
+        authenticated={authenticated}
+        chatPending={chat.isPending}
+        conversionPending={ticketConversion.isPending}
+        conversionRetryAvailable={Boolean(retryTicketPayload)}
+        conversionConflict={conversionConflict}
+        onRequireAuth={() => {
+          if (conversation) saveActiveConversationId(conversation.id);
+        }}
+        onSelectCategory={(id, name) =>
+          submit(
+            `Selecciono la categoría ${formatCategoryDisplayName(name)} (${id}).`,
+          )
+        }
+        onCorrect={(body, categoryName) =>
+          submit(ticketDraftCorrectionMessage(body, categoryName))
+        }
+        onCancel={() =>
+          submit("Cancela el borrador del ticket. No deseo continuar con su creación.")
+        }
+        onConfirm={confirmTicket}
+        onRetry={retryTicketConversion}
+      />
+    );
+  };
 
   return (
+    <>
     <section className={`assistant-panel assistant-panel--${variant}`}>
       <header className="assistant-panel__head">
         <span className="assistant-panel__avatar" aria-hidden="true">
@@ -816,7 +1066,10 @@ export function AssistantConversation({
           variant="quiet"
           disabled={!conversation || reset.isPending || chat.isPending}
           isLoading={reset.isPending}
-          onClick={() => reset.mutate()}
+          onClick={(event) => {
+            lifecycleTriggerRef.current = event.currentTarget;
+            setLifecycleConfirmation("restart");
+          }}
           aria-label="Reiniciar conversación"
           title="Reiniciar conversación"
         >
@@ -824,6 +1077,30 @@ export function AssistantConversation({
           <span className="assistant-panel__reset-label">Reiniciar</span>
         </Button>
       </header>
+
+      {conversation && !terminalConversation ? (
+        <div className="assistant-lifecycle-controls" aria-label="Acciones de conversación">
+          {messages.length > 0 && !conversation.menu_open ? (
+            <Button
+              variant="secondary"
+              disabled={isRestoring || chat.isPending || reset.isPending}
+              onClick={() => submit("volver al menú")}
+            >
+              <List aria-hidden="true" /> Volver al menú
+            </Button>
+          ) : null}
+          <Button
+            variant="quiet"
+            disabled={isRestoring || chat.isPending || reset.isPending}
+            onClick={(event) => {
+              lifecycleTriggerRef.current = event.currentTarget;
+              setLifecycleConfirmation("end");
+            }}
+          >
+            <LogOut aria-hidden="true" /> Finalizar
+          </Button>
+        </div>
+      ) : null}
 
       <div
         className="assistant-messages"
@@ -886,41 +1163,7 @@ export function AssistantConversation({
                         </div>
                       ) : null}
 
-                      {ticketDraft ||
-                      conversation?.converted_ticket ||
-                      conversation?.status === "CONVERTED_TO_TICKET" ? (
-                        <AssistantTicketDraft
-                          conversationStatus={conversation?.status}
-                          draft={ticketDraft}
-                          convertedTicket={conversation?.converted_ticket}
-                          categories={categories.data}
-                          categoriesLoading={categories.isLoading}
-                          categoriesError={categories.isError}
-                          authenticated={authenticated}
-                          chatPending={chat.isPending}
-                          conversionPending={ticketConversion.isPending}
-                          conversionRetryAvailable={Boolean(retryTicketPayload)}
-                          conversionConflict={conversionConflict}
-                          onRequireAuth={() => {
-                            if (conversation) {
-                              saveActiveConversationId(conversation.id);
-                            }
-                          }}
-                          onSelectCategory={(id, name) =>
-                            submit(
-                              `Selecciono la categoría ${formatCategoryDisplayName(name)} (${id}).`,
-                            )
-                          }
-                          onCorrect={(body, categoryName) =>
-                            submit(ticketDraftCorrectionMessage(body, categoryName))
-                          }
-                          onCancel={() =>
-                            submit("Cancela el borrador del ticket. No deseo continuar con su creación.")
-                          }
-                          onConfirm={confirmTicket}
-                          onRetry={retryTicketConversion}
-                        />
-                      ) : null}
+                      {renderTicketDraft()}
 
                       {ticketQueryPresentation ? (
                         <AssistantTicketQueryResult
@@ -1079,54 +1322,37 @@ export function AssistantConversation({
             );
           })
         ) : (
-          <div className="assistant-welcome">
-            <div className="assistant-welcome__intro">
-              <span aria-hidden="true">
-                <Bot />
-              </span>
-              <div>
-                <h2>¿Qué necesitas resolver hoy?</h2>
-                <p>
-                  Hola, soy el asistente GNB. Elige un tema o cuéntame qué
-                  necesitas.
-                </p>
-              </div>
-            </div>
-            <div className="assistant-topic-grid" role="group" aria-label="Temas de atención">
-              {assistantTopics.map(({ label, prompt, Icon }) => (
-                <button
-                  type="button"
-                  key={label}
-                  disabled={isRestoring || chat.isPending}
-                  onClick={() => submit(prompt)}
-                >
-                  <Icon aria-hidden="true" />
-                  <span>{label}</span>
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-            <details className="assistant-faq-suggestions">
-              <summary>
-                Preguntas frecuentes
-                <ChevronDown aria-hidden="true" />
-              </summary>
-              <div className="assistant-examples">
-                {exampleQuestions.map((question) => (
-                  <button
-                    type="button"
-                    key={question}
-                    disabled={isRestoring || chat.isPending}
-                    onClick={() => submit(question)}
-                  >
-                    {question}
-                    <ChevronRight aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-            </details>
-          </div>
+          <AssistantWelcomeMenu
+            disabled={isRestoring || chat.isPending}
+            onSubmit={submit}
+          />
         )}
+
+        {messages.length > 0 && conversation?.menu_open ? (
+          <AssistantWelcomeMenu
+            disabled={isRestoring || chat.isPending}
+            onSubmit={submit}
+          />
+        ) : null}
+
+        {terminalConversation ? (
+          <section className="assistant-terminal" role="status">
+            <strong>Conversación finalizada</strong>
+            <p>{terminalMessage}</p>
+            <Button
+              variant="secondary"
+              autoFocus
+              disabled={reset.isPending}
+              isLoading={reset.isPending}
+              onClick={(event) => {
+                lifecycleTriggerRef.current = event.currentTarget;
+                setLifecycleConfirmation("restart");
+              }}
+            >
+              <RotateCcw aria-hidden="true" /> Iniciar conversación nueva
+            </Button>
+          </section>
+        ) : null}
 
         {chat.isPending ? (
           <article className="assistant-message assistant-message--bot assistant-message--typing">
@@ -1179,42 +1405,11 @@ export function AssistantConversation({
           </div>
         ) : null}
 
-        {!lastReply &&
-        conversation &&
-        (ticketDraft ||
-          conversation.converted_ticket ||
-          conversation.status === "CONVERTED_TO_TICKET") ? (
-          <AssistantTicketDraft
-            conversationStatus={conversation.status}
-            draft={ticketDraft}
-            convertedTicket={conversation.converted_ticket}
-            categories={categories.data}
-            categoriesLoading={categories.isLoading}
-            categoriesError={categories.isError}
-            authenticated={authenticated}
-            chatPending={chat.isPending}
-            conversionPending={ticketConversion.isPending}
-            conversionRetryAvailable={Boolean(retryTicketPayload)}
-            conversionConflict={conversionConflict}
-            onRequireAuth={() => saveActiveConversationId(conversation.id)}
-            onSelectCategory={(id, name) =>
-              submit(
-                `Selecciono la categoría ${formatCategoryDisplayName(name)} (${id}).`,
-              )
-            }
-            onCorrect={(body, categoryName) =>
-              submit(ticketDraftCorrectionMessage(body, categoryName))
-            }
-            onCancel={() =>
-              submit("Cancela el borrador del ticket. No deseo continuar con su creación.")
-            }
-            onConfirm={confirmTicket}
-            onRetry={retryTicketConversion}
-          />
-        ) : null}
+        {!lastReply ? renderTicketDraft() : null}
       </div>
       </div>
 
+      {!terminalConversation ? (
       <form
         className="assistant-composer"
         onSubmit={(event) => {
@@ -1225,6 +1420,7 @@ export function AssistantConversation({
         <label>
           <span className="sr-only">Escribe tu consulta</span>
           <textarea
+            ref={composerRef}
             rows={variant === "widget" ? 1 : 2}
             value={value}
             onChange={(event) => setValue(event.target.value)}
@@ -1232,12 +1428,12 @@ export function AssistantConversation({
             placeholder="Escribe tu consulta…"
             autoComplete="off"
             maxLength={10000}
-            disabled={isRestoring}
+            disabled={isRestoring || chat.isPending || reset.isPending}
           />
         </label>
         <Button
           type="submit"
-          disabled={!value.trim() || chat.isPending || isRestoring}
+          disabled={!value.trim() || chat.isPending || isRestoring || reset.isPending}
           isLoading={chat.isPending}
           aria-label="Enviar consulta"
         >
@@ -1249,7 +1445,67 @@ export function AssistantConversation({
           <span>Evita ingresar información financiera personal.</span>
         </p>
       </form>
+      ) : null}
     </section>
+    {lifecycleConfirmation ? (
+      <div
+        className="assistant-lifecycle-backdrop"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeLifecycleConfirmation();
+        }}
+      >
+        <section
+          ref={lifecycleDialogRef}
+          className="assistant-lifecycle-dialog"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby={lifecycleDialogTitleId}
+          aria-describedby={lifecycleDialogDescriptionId}
+        >
+          <span className="assistant-lifecycle-dialog__icon" aria-hidden="true">
+            {lifecycleConfirmation === "end" ? <LogOut /> : <RotateCcw />}
+          </span>
+          <div className="assistant-lifecycle-dialog__copy">
+            <h2 id={lifecycleDialogTitleId}>
+              {lifecycleConfirmation === "end"
+                ? "¿Finalizar esta conversación?"
+                : "¿Iniciar una conversación nueva?"}
+            </h2>
+            <p id={lifecycleDialogDescriptionId}>
+              {lifecycleConfirmation === "end"
+                ? "Se cerrará esta conversación y se conservará su historial. No se creará un ticket; si hay un borrador sin confirmar, se cancelará."
+                : "La conversación actual permanecerá guardada. Abriremos una nueva para que puedas consultar otro tema desde el inicio."}
+            </p>
+          </div>
+          <div className="assistant-lifecycle-dialog__actions">
+            <button
+              ref={lifecycleCancelRef}
+              type="button"
+              className="button button--secondary"
+              onClick={closeLifecycleConfirmation}
+            >
+              {lifecycleConfirmation === "end" ? "Seguir conversando" : "Seguir aquí"}
+            </button>
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={chat.isPending || reset.isPending}
+              onClick={
+                lifecycleConfirmation === "end"
+                  ? confirmEndConversation
+                  : confirmRestartConversation
+              }
+            >
+              {lifecycleConfirmation === "end"
+                ? "Finalizar conversación"
+                : "Reiniciar conversación"}
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null}
+    </>
   );
 }
 

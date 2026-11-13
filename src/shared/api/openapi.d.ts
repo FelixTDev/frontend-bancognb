@@ -1473,6 +1473,8 @@ export interface components {
             ticket_query?: components["schemas"]["ChatbotTicketQuery"] | null;
             /** @description Borrador estructurado del ticket. Solo READY_FOR_CONFIRMATION permite que la interfaz solicite confirmación en el endpoint de conversión. */
             ticket_draft?: components["schemas"]["ChatbotTicketDraft"];
+            /** @description Indica que la respuesta abrió el menú de temas del asistente. */
+            menu_open?: boolean;
             /** Fallback Reason */
             fallback_reason?: string | null;
             /** @default ACTIVE */
@@ -1648,7 +1650,7 @@ export interface components {
          * ChatbotSuggestedAction
          * @enum {string}
          */
-        ChatbotSuggestedAction: "NONE" | "ASK_CLARIFICATION" | "CONVERT_TO_TICKET" | "CONTACT_ADVISOR" | "AUTHENTICATION_REQUIRED" | "LIST_MY_TICKETS" | "COUNT_MY_TICKETS" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "LATEST_ADVISOR_RESPONSE" | "CLIENT_ACTION_REQUIRED" | "CLARIFY_TICKET_CODE";
+        ChatbotSuggestedAction: "NONE" | "ASK_CLARIFICATION" | "CONVERT_TO_TICKET" | "CONTACT_ADVISOR" | "AUTHENTICATION_REQUIRED" | "LIST_MY_TICKETS" | "COUNT_MY_TICKETS" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "LATEST_ADVISOR_RESPONSE" | "CLIENT_ACTION_REQUIRED" | "CLARIFY_TICKET_CODE" | "SHOW_MENU" | "END_CONVERSATION";
         /** ChatbotTicketCard */
         ChatbotTicketCard: {
             /**
@@ -1682,6 +1684,8 @@ export interface components {
         ChatbotTicketDraft: {
             /** @default INACTIVE */
             status: components["schemas"]["ChatbotTicketDraftStatus"];
+            /** @description Indica que el borrador se conserva mientras el cliente consulta otro tema. */
+            paused?: boolean;
             fields?: components["schemas"]["ChatbotTicketDraftFields"];
             /** Missing Fields */
             missing_fields?: components["schemas"]["ChatbotTicketDraftField"][];
@@ -1839,6 +1843,8 @@ export interface components {
             last_activity_at?: string | null;
             /** @description Estado y campos permitidos del borrador conversacional de ticket. */
             ticket_draft?: components["schemas"]["ChatbotTicketDraft"];
+            /** @description Indica que al restaurar la conversación se debe mostrar el menú de temas. */
+            menu_open?: boolean;
             /** @description Resumen del ticket asociado; nulo si la conversación no fue convertida. */
             converted_ticket?: components["schemas"]["ChatbotConvertedTicketSummary"] | null;
             /** Messages */

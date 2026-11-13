@@ -647,6 +647,11 @@ test("reinicia en una conversación nueva y tras recargar solo recupera su histo
   await page.goto("/app/asistente");
   await expect(page.getByText("Historial anterior que debe conservarse")).toBeVisible();
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
+  const resetConfirmation = page.getByRole("alertdialog");
+  await expect(resetConfirmation).toContainText("permanecerá guardada");
+  await resetConfirmation
+    .getByRole("button", { name: "Reiniciar conversación" })
+    .click();
   await expect(page.getByText("¿Qué necesitas resolver hoy?")).toBeVisible();
   expect(
     await page.evaluate(() =>
@@ -694,6 +699,10 @@ test("si falla el reinicio conserva la conversación y permite reintentarlo", as
   await page.goto("/app/asistente");
   await expect(page.getByText("Este historial debe permanecer visible")).toBeVisible();
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Reiniciar conversación" })
+    .click();
   await expect(page.getByRole("alert")).toContainText("Tu conversación actual sigue disponible");
   await expect(page.getByText("Este historial debe permanecer visible")).toBeVisible();
   expect(
