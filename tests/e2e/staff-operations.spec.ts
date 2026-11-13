@@ -1,8 +1,24 @@
-import { expect, test, type APIResponse, type Page } from "@playwright/test";
+import { expect, test, type APIResponse, type Page } from "./fixtures";
 import type { Ticket } from "../../src/shared/types/domain";
 
-const apiBase = "http://localhost:8000/api/v1";
+const isolatedApiBaseUrl =
+  process.env.E2E_API_BASE_URL?.trim().replace(/\/+$/, "") || undefined;
+const requiredIsolatedApiBaseUrl = "http://127.0.0.1:8001/api/v1";
+const apiBase = isolatedApiBaseUrl ?? requiredIsolatedApiBaseUrl;
 const password = "demo-password-local";
+
+if (isolatedApiBaseUrl && isolatedApiBaseUrl !== requiredIsolatedApiBaseUrl) {
+  throw new Error(
+    "E2E_API_BASE_URL must target the isolated local API at 127.0.0.1:8001/api/v1.",
+  );
+}
+
+test.beforeEach(() => {
+  test.skip(
+    !isolatedApiBaseUrl,
+    "La suite requiere un backend desechable explícito en 127.0.0.1:8001.",
+  );
+});
 
 async function login(page: Page, email: string) {
   await page.goto("/ingresar");

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "./fixtures";
 
 const session = {
   token: "assistant-phase1-test-token",
@@ -227,6 +227,94 @@ test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", a
   await expect(widget.getByRole("link", { name: "Iniciar sesión" })).toBeVisible();
   expect(sent()).toBe(3);
   expect(unhandled).toEqual([]);
+});
+
+test("muestra una respuesta de IA aceptada con su fuente verificada", async ({
+  page,
+}) => {
+  await openAssistant(page, false);
+  const sent = await installCreateAndMessageRoutes(page, () =>
+    reply("NONE", {
+      bot_message: message(
+        "accepted-ai-answer",
+        "BOT",
+        "Los servicios adicionales pueden configurarse desde canales digitales.",
+      ),
+      response_source: "AI",
+      fallback_reason: null,
+      sources: [
+        {
+          title: "Compras por internet en tarjetas",
+          category: "Tarjetas",
+          url: "https://www.bancognb.com.pe/inicio/banca-personas/tarjetas",
+          verified_at: "2026-11-01T00:00:00Z",
+        },
+      ],
+    }),
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "¿Cómo configuro compras por internet?");
+  await expect.poll(sent).toBe(1);
+
+  await expect(
+    widget.getByText(
+      "Los servicios adicionales pueden configurarse desde canales digitales.",
+    ),
+  ).toBeVisible();
+  await expect(
+    widget.getByRole("link", { name: "Compras por internet en tarjetas" }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.bancognb.com.pe/inicio/banca-personas/tarjetas",
+  );
+  await expect(widget.getByText(/verificada/i)).toBeVisible();
+  await expect(widget.getByText("OUT_OF_CONTEXT")).toHaveCount(0);
+  await expect(widget.getByText("GENERATED")).toHaveCount(0);
+});
+
+test("muestra el fallback sin fuentes inventadas y permite continuar consultando", async ({
+  page,
+}) => {
+  await openAssistant(page, false);
+  const sent = await installCreateAndMessageRoutes(page, (index) =>
+    index === 0
+      ? reply("NONE", {
+          bot_message: message(
+            "safe-fallback",
+            "BOT",
+            "No encontré información suficiente para responder con seguridad.",
+          ),
+          fallback_reason: "OUT_OF_CONTEXT",
+          response_source: "FALLBACK",
+          sources: [],
+        })
+      : reply("NONE", {
+          bot_message: message(
+            "followup-after-fallback",
+            "BOT",
+            "Puedo ayudarte con otra consulta.",
+          ),
+          sources: [],
+        }),
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "¿Qué debería hacer?");
+  await expect(
+    widget.getByText(
+      "No encontré información suficiente para responder con seguridad.",
+    ),
+  ).toBeVisible();
+  await expect(
+    widget.getByRole("heading", { name: "Fuentes consultadas" }),
+  ).toHaveCount(0);
+
+  await sendMessage(page, "Quiero consultar otra cosa");
+  await expect(
+    widget.getByText("Puedo ayudarte con otra consulta."),
+  ).toBeVisible();
+  expect(sent()).toBe(2);
 });
 
 test("solicitar contacto con asesor requiere una acción explícita", async ({

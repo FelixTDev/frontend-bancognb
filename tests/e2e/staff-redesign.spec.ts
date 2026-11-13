@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "./fixtures";
 import type { Attachment, Comment, Ticket, TicketHistoryEntry, UserRole } from "../../src/shared/types/domain";
 
 const advisorId = "00000000-0000-4000-8000-000000000002";
