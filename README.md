@@ -5,7 +5,7 @@ Frontend completo para el sistema de gestión de tickets. Está construido con R
 ## Requisitos
 
 - Node.js 20 o superior.
-- Backend disponible en `http://localhost:8000`.
+- Backend de pruebas disponible en `http://127.0.0.1:8010`.
 - Datos demo inicializados en el backend.
 
 ## Inicio local

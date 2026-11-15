@@ -5,7 +5,7 @@ export const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
     /\/$/,
     "",
-  ) ?? "http://localhost:8000/api/v1";
+  ) ?? "http://127.0.0.1:8010/api/v1";
 
 export const http = createHttpClient({
   baseUrl: API_BASE_URL,
