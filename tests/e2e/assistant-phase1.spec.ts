@@ -272,6 +272,10 @@ test("muestra una respuesta de IA aceptada con su fuente verificada", async ({
       "Los servicios adicionales pueden configurarse desde canales digitales.",
     ),
   ).toBeVisible();
+  await expect(widget.getByRole("status")).toHaveText(
+    "Respuesta generada con IA.",
+  );
+  await widget.locator(".assistant-sources > summary").click();
   await expect(
     widget.getByRole("link", { name: "Compras por internet en tarjetas" }),
   ).toHaveAttribute(
@@ -316,6 +320,10 @@ test("muestra el fallback sin fuentes inventadas y permite continuar consultando
       "No encontré información suficiente para responder con seguridad.",
     ),
   ).toBeVisible();
+  await expect(widget.getByRole("status")).toHaveText(
+    "Respuesta de respaldo. No se pudo validar una respuesta de IA.",
+  );
+  await expect(widget.getByText("OUT_OF_CONTEXT")).toHaveCount(0);
   await expect(
     widget.getByRole("heading", { name: "Fuentes consultadas" }),
   ).toHaveCount(0);

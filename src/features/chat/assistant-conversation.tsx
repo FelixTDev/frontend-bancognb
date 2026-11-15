@@ -45,6 +45,7 @@ import {
   type AssistantTicketQueryPresentation,
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
+  getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
   formatAssistantMessage,
   ticketDraftCorrectionMessage,
@@ -1060,6 +1061,9 @@ export function AssistantConversation({
         conversation?.status ?? lastReply.conversation_status ?? "",
       )
     : null;
+  const responseStatus = lastReply
+    ? getAssistantResponseStatus(lastReply)
+    : null;
   const ticketQueryPresentation = lastReply
     ? getAssistantTicketQueryPresentation(lastReply)
     : null;
@@ -1248,6 +1252,16 @@ export function AssistantConversation({
                   </p>
                   {isLatestReply ? (
                     <div className="assistant-message__details">
+                      {responseStatus ? (
+                        <div
+                          className="assistant-response-status"
+                          role="status"
+                        >
+                          {responseStatus === "ai"
+                            ? "Respuesta generada con IA."
+                            : "Respuesta de respaldo. No se pudo validar una respuesta de IA."}
+                        </div>
+                      ) : null}
                       {replyPresentation?.needsClarification ? (
                         <div className="assistant-clarification">
                           <strong>

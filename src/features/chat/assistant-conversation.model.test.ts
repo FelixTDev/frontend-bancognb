@@ -3,6 +3,7 @@ import type { BotMessageResponse } from "../../shared/api/endpoints";
 import {
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
+  getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
 } from "./assistant-conversation.model";
 
@@ -132,6 +133,35 @@ describe("assistant reply presentation", () => {
 
     expect(failedSearch.canRequestFollowup).toBe(false);
     expect(escalated.canRequestFollowup).toBe(false);
+  });
+});
+
+describe("assistant response source status", () => {
+  it("labels accepted AI answers", () => {
+    expect(
+      getAssistantResponseStatus(
+        makeReply({ fallback_reason: null, response_source: "AI" }),
+      ),
+    ).toBe("ai");
+  });
+
+  it("labels a deterministic answer with a fallback reason without exposing it", () => {
+    expect(
+      getAssistantResponseStatus(
+        makeReply({
+          fallback_reason: "OUT_OF_CONTEXT",
+          response_source: "DETERMINISTIC",
+        }),
+      ),
+    ).toBe("fallback");
+  });
+
+  it("does not label ordinary deterministic responses as fallbacks", () => {
+    expect(
+      getAssistantResponseStatus(
+        makeReply({ fallback_reason: null, response_source: "DETERMINISTIC" }),
+      ),
+    ).toBeNull();
   });
 });
 

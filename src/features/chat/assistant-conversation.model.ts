@@ -57,6 +57,8 @@ export interface AssistantReplyPresentation {
   readonly showTicketOffer: boolean;
 }
 
+export type AssistantResponseStatus = "ai" | "fallback" | null;
+
 export type AssistantRequestContext = "conversation" | "ticket";
 
 const assistantCategoryLabels: Record<string, string> = {
@@ -203,6 +205,15 @@ export function getAssistantReplyPresentation(
     canRequestFollowup: action === "CONTACT_ADVISOR" && isActive,
     showTicketOffer: action === "CONVERT_TO_TICKET" && isActive,
   };
+}
+
+export function getAssistantResponseStatus(
+  reply: Pick<BotMessageResponse, "response_source" | "fallback_reason">,
+): AssistantResponseStatus {
+  if (reply.fallback_reason || reply.response_source === "FALLBACK") {
+    return "fallback";
+  }
+  return reply.response_source === "AI" ? "ai" : null;
 }
 
 export function getAssistantTicketQueryPresentation(
