@@ -1,6 +1,7 @@
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { PublicAssistantWidget } from "../features/chat/public-assistant-widget";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { BrandMark } from "../shared/components/brand-mark";
 import { ButtonLink } from "../shared/components/ui";
 
@@ -14,8 +15,13 @@ const links = [
 
 export function PublicLayout() {
   const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
+  const isHowProcess = location.pathname === "/como-funciona";
+  const isHelpPage = location.pathname === "/ayuda";
   return (
-    <div className="public-shell">
+    <div
+      className={`public-shell${isHowProcess ? " public-shell--how-process" : ""}${isHelpPage ? " public-shell--help" : ""}`}
+    >
       <a className="skip-link" href="#contenido-principal">
         Saltar al contenido
       </a>
@@ -62,6 +68,7 @@ export function PublicLayout() {
         <Outlet />
       </main>
       <Footer />
+      <PublicAssistantWidget />
     </div>
   );
 }

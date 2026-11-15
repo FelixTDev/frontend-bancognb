@@ -685,7 +685,14 @@ test("el asistente vincula, retroalimenta, escala, reinicia y prepara una solici
     page.locator(".assistant-escalation").getByText(/no es un chat humano en tiempo real/i),
   ).toBeVisible();
   await page.getByRole("button", { name: "Reiniciar conversación" }).click();
-  await expect(page.getByText("¿En qué podemos orientarte?")).toBeVisible();
+  const restartDialog = page.getByRole("alertdialog", {
+    name: "¿Iniciar una conversación nueva?",
+  });
+  await expect(restartDialog).toBeVisible();
+  await restartDialog
+    .getByRole("button", { name: "Reiniciar conversación" })
+    .click();
+  await expect(page.getByText("¿Qué necesitas resolver hoy?")).toBeVisible();
   await page
     .getByPlaceholder("Escribe tu consulta…")
     .fill("Necesito registrar esta consulta");
@@ -708,7 +715,7 @@ test("asesor inicia sesión y abre su bandeja", async ({ page }, testInfo) => {
   await login(page, "asesor@demo.com");
   await expect(page).toHaveURL(/\/asesor\/panel$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Panel de atención",
+    "Kanban de atención",
   );
   await openAppNavigation(page, testInfo.project.name);
   await page

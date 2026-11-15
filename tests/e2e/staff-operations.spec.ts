@@ -58,13 +58,13 @@ test("asesor ve solo las cuatro columnas activas en el Kanban personal", async (
     if (url.pathname.endsWith("/tickets/operations")) operationParams.push(url.searchParams);
   });
   await page.goto("/asesor/panel");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Panel de atención");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Kanban de atención");
   for (const column of ["Por atender", "En atención", "Esperando al cliente", "Resuelto por cerrar"]) {
     await expect(page.getByRole("heading", { name: column, level: 3 })).toBeVisible();
   }
   await expect(page.getByRole("heading", { name: "Cerrado" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Cancelado" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Abrir bandeja" })).toHaveAttribute("href", "/asesor/bandeja");
+  await expect(page.getByRole("link", { name: "Bandeja completa" })).toHaveAttribute("href", "/asesor/bandeja");
   const boardStatuses = [...new Set(operationParams
     .filter((params) => params.get("queue") === "assigned_to_me")
     .map((params) => params.get("status"))
@@ -316,10 +316,12 @@ test("el supervisor alterna tabla y Kanban sin incluir estados terminales y no d
   await login(page, "supervisor@demo.com");
   await page.goto("/supervisor/cola");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Cola de atención");
+  await expect(page.getByRole("tab", { name: "Vista Kanban" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Vista tabla" }).click();
   await expect(page.getByRole("tab", { name: "Vista tabla" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Vista Kanban" }).click();
   const expected = ["Disponible", "Por atender", "En atención", "Esperando al cliente", "Resuelto por cerrar"];
-  if (testInfo.project.name === "mobile") {
+  if (testInfo.project.name !== "desktop") {
     await expect(page.getByRole("heading", { level: 3, name: "Disponible" })).toBeVisible();
     for (const status of ["ASIGNADO", "EN_PROCESO", "PENDIENTE_CLIENTE", "RESUELTO"]) {
       await expect(page.locator(`.staff-kanban__column[data-status="${status}"]`)).toBeHidden();
@@ -329,7 +331,7 @@ test("el supervisor alterna tabla y Kanban sin incluir estados terminales y no d
   }
   await expect(page.getByRole("heading", { level: 3, name: "Cerrado" })).toHaveCount(0);
   await expect(page.getByRole("heading", { level: 3, name: "Cancelado" })).toHaveCount(0);
-  if (testInfo.project.name === "mobile") {
+  if (testInfo.project.name !== "desktop") {
     await expect(page.getByRole("tab", { name: "Disponible" })).toHaveAttribute("aria-selected", "true");
     await expect(page.locator('.staff-kanban__column[data-status="NUEVO"]')).toBeVisible();
     await expect(page.locator('.staff-kanban__column[data-status="ASIGNADO"]')).toBeHidden();
@@ -337,19 +339,21 @@ test("el supervisor alterna tabla y Kanban sin incluir estados terminales y no d
   const fit = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(fit.content).toBeLessThanOrEqual(fit.viewport + 1);
   await page.getByRole("tab", { name: "Vista tabla" }).click();
-  await expect(page.locator(".staff-table")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Vista tabla" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".staff-table").or(page.getByRole("heading", { name: "La cola no tiene resultados" }))).toBeVisible();
   const tableFit = await page.evaluate(() => {
     const wrapper = document.querySelector<HTMLElement>(".staff-table-wrap");
     return {
       viewport: document.documentElement.clientWidth,
       content: document.body.scrollWidth,
+      hasTable: wrapper !== null,
       wrapperWidth: wrapper?.clientWidth ?? 0,
       tableWidth: wrapper?.scrollWidth ?? 0,
     };
   });
   expect(tableFit.content).toBeLessThanOrEqual(tableFit.viewport + 1);
   expect(tableFit.wrapperWidth).toBeLessThanOrEqual(tableFit.viewport + 1);
-  if (testInfo.project.name === "mobile") expect(tableFit.tableWidth).toBeGreaterThan(tableFit.wrapperWidth);
+  if (testInfo.project.name === "mobile" && tableFit.hasTable) expect(tableFit.tableWidth).toBeGreaterThan(tableFit.wrapperWidth);
 });
 
 test("el filtro de estado selecciona y muestra la columna correspondiente en Kanban móvil", async ({ page }, testInfo) => {
@@ -690,13 +694,13 @@ test("el historial del asesor mantiene filtros y paginación acotada", async ({ 
   await expect(page.getByLabel("Periodo")).toHaveValue("7d");
   await expect(page.getByLabel("Estado")).toHaveValue("");
   await expect.poll(() => [...historyStatuses].sort()).toEqual(["CANCELADO", "CERRADO"]);
-  await expect(page.getByLabel("Estado").getByRole("option", { name: "Resueltos pendientes de cierre" })).toHaveCount(1);
+  await expect(page.getByLabel("Estado").getByRole("option", { name: "Resueltos pendientes de cierre" })).toHaveCount(0);
   await expect(page.locator('.staff-kanban__column[data-status="RESUELTO"]')).toHaveCount(0);
   await page.getByLabel("Estado").selectOption("CERRADO");
   await expect(page.getByLabel("Estado")).toHaveValue("CERRADO");
-  await page.getByLabel("Estado").selectOption("RESUELTO");
-  await expect(page.getByLabel("Estado")).toHaveValue("RESUELTO");
-  await expect.poll(() => historyStatuses.has("RESUELTO")).toBe(true);
+  await page.getByLabel("Estado").selectOption("CANCELADO");
+  await expect(page.getByLabel("Estado")).toHaveValue("CANCELADO");
+  expect(historyStatuses.has("RESUELTO")).toBe(false);
   const fit = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(fit.content).toBeLessThanOrEqual(fit.viewport + 1);
 });

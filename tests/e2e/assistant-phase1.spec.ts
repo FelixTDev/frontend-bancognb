@@ -210,12 +210,20 @@ test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", a
   const widget = page.getByRole("dialog", { name: "Asistente GNB" });
   await sendMessage(page, "Quiero consultar un tema sin usar las preguntas sugeridas");
   await expect(widget.getByRole("button", { name: "Consultar un saldo" })).toBeVisible();
+  const sourcesDisclosure = widget.locator(".assistant-sources > summary");
+  await expect(sourcesDisclosure).toBeVisible();
+  await sourcesDisclosure.click();
   const sourceLink = widget.getByRole("link", { name: "Canales digitales" });
   await expect(sourceLink).toHaveAttribute(
     "href",
     "https://www.bancognb.com.pe/inicio/canales/canales-digitales",
   );
   await expect(sourceLink).toHaveAttribute("rel", /noopener/);
+  await expect(
+    widget.getByText(
+      "https://www.bancognb.com.pe/inicio/canales/canales-digitales",
+    ),
+  ).toBeVisible();
   await expect(widget.getByText(/verificada/i)).toBeVisible();
   await expect(widget.getByText("Fuente no segura")).toBeVisible();
   await expect(widget.locator('a[href^="javascript:"]')).toHaveCount(0);

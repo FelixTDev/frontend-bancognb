@@ -5,12 +5,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleStop,
   CreditCard,
   ExternalLink,
   Landmark,
   Link2,
   List,
-  LogOut,
   MessageCircleMore,
   RefreshCw,
   RotateCcw,
@@ -766,6 +766,11 @@ export function AssistantConversation({
     const element = messagesRef.current;
     if (!element) return;
 
+    if (messages.length === 0) {
+      element.scrollTop = 0;
+      return;
+    }
+
     const latestVisibleMessage = messages[messages.length - 1];
     const latestReplyElement = element.querySelector<HTMLElement>(
       "[data-latest-reply='true']",
@@ -1135,7 +1140,14 @@ export function AssistantConversation({
 
   return (
     <>
-    <section className={`assistant-panel assistant-panel--${variant}`}>
+    <section
+      className={`assistant-panel assistant-panel--${variant}`}
+      data-welcome-only={
+        variant === "widget" && !conversation && messages.length === 0 && !isRestoring
+          ? "true"
+          : undefined
+      }
+    >
       <header className="assistant-panel__head">
         <span className="assistant-panel__avatar" aria-hidden="true">
           <Bot />
@@ -1171,13 +1183,12 @@ export function AssistantConversation({
         <div
           className="assistant-lifecycle-controls"
           role="group"
-          aria-label="Acciones de conversación"
+          aria-label="Controles de conversación"
         >
-          <span className="assistant-lifecycle-controls__label">Acciones</span>
           {messages.length > 0 && !conversation.menu_open ? (
             <Button
               className="assistant-lifecycle-controls__back"
-              variant="primary"
+              variant="quiet"
               disabled={isRestoring || chat.isPending || reset.isPending}
               onClick={() => submit("volver al menú")}
             >
@@ -1192,8 +1203,10 @@ export function AssistantConversation({
               lifecycleTriggerRef.current = event.currentTarget;
               setLifecycleConfirmation("end");
             }}
+            aria-label="Finalizar conversación"
+            title="Finalizar conversación"
           >
-            <LogOut aria-hidden="true" /> Finalizar
+            <CircleStop aria-hidden="true" /> Finalizar conversación
           </Button>
         </div>
       ) : null}
@@ -1274,11 +1287,13 @@ export function AssistantConversation({
                       ) : null}
 
                       {lastReply?.sources?.length ? (
-                        <section
-                          className="assistant-sources"
-                          aria-label="Fuentes consultadas"
-                        >
-                          <h3>Fuentes consultadas</h3>
+                        <details className="assistant-sources">
+                          <summary>
+                            {lastReply.sources.length === 1
+                              ? "Ver fuente"
+                              : "Ver fuentes"}
+                            <ChevronDown aria-hidden="true" />
+                          </summary>
                           <ul>
                             {lastReply.sources.map((source, index) => {
                               const href = safeSourceUrl(source.url);
@@ -1290,24 +1305,31 @@ export function AssistantConversation({
                                   key={`${source.title}-${source.url ?? "source"}-${index}`}
                                 >
                                   <div className="assistant-source__details">
-                                    {href ? (
-                                      <a
-                                        href={href}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                      >
-                                        <span>{source.title}</span>
-                                        <ExternalLink aria-hidden="true" />
-                                        <span className="sr-only">
-                                          {" "}(abre en una pestaña nueva)
+                                    <div className="assistant-source__heading">
+                                      {href ? (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                        >
+                                          <span>{source.title}</span>
+                                          <ExternalLink aria-hidden="true" />
+                                          <span className="sr-only">
+                                            {" "}(abre en una pestaña nueva)
+                                          </span>
+                                        </a>
+                                      ) : (
+                                        <strong>{source.title}</strong>
+                                      )}
+                                      {source.category ? (
+                                        <span className="assistant-source__category">
+                                          {formatCategoryDisplayName(source.category)}
                                         </span>
-                                      </a>
-                                    ) : (
-                                      <strong>{source.title}</strong>
-                                    )}
-                                    {source.category ? (
-                                      <span className="assistant-source__category">
-                                        {formatCategoryDisplayName(source.category)}
+                                      ) : null}
+                                    </div>
+                                    {href ? (
+                                      <span className="assistant-source__url">
+                                        {href}
                                       </span>
                                     ) : null}
                                   </div>
@@ -1316,7 +1338,7 @@ export function AssistantConversation({
                               );
                             })}
                           </ul>
-                        </section>
+                        </details>
                       ) : null}
 
                       {lastReply ? (
@@ -1586,7 +1608,7 @@ export function AssistantConversation({
           aria-describedby={lifecycleDialogDescriptionId}
         >
           <span className="assistant-lifecycle-dialog__icon" aria-hidden="true">
-            {lifecycleConfirmation === "end" ? <LogOut /> : <RotateCcw />}
+            {lifecycleConfirmation === "end" ? <CircleStop /> : <RotateCcw />}
           </span>
           <div className="assistant-lifecycle-dialog__copy">
             <h2 id={lifecycleDialogTitleId}>
