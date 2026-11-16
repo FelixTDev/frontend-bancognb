@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Bot,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleStop,
@@ -16,8 +15,6 @@ import {
   RotateCcw,
   Send,
   Smartphone,
-  ThumbsDown,
-  ThumbsUp,
   UserRound,
 } from "lucide-react";
 import {
@@ -42,11 +39,13 @@ import { ApiError } from "../../shared/api/http";
 import { Button, ResponsiveImage } from "../../shared/components/ui";
 import { formatCategoryDisplayName } from "../../shared/ticket-labels";
 import {
+  type AssistantClarificationChoice,
   type AssistantTicketQueryPresentation,
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
+  getAssistantClarificationChoices,
   formatAssistantMessage,
   ticketDraftCorrectionMessage,
   type ReadyTicketDraftPayload,
@@ -220,6 +219,46 @@ function AssistantInteractiveOptions({
         ))}
       </div>
     </section>
+  );
+}
+
+function AssistantClarificationOptions({
+  choices,
+  disabled,
+  onSelect,
+}: {
+  readonly choices: readonly AssistantClarificationChoice[];
+  readonly disabled: boolean;
+  readonly onSelect: (choice: AssistantClarificationChoice) => void;
+}) {
+  if (!choices.length) return null;
+
+  return (
+    <div
+      className="assistant-clarification__choices"
+      role="group"
+      aria-label="Opciones de aclaración"
+    >
+      {choices.map((choice) => {
+        const label =
+          choice.kind === "structured" ? choice.option.label : choice.label;
+        return (
+          <button
+            key={
+              choice.kind === "structured"
+                ? `structured-${choice.option.id}`
+                : `text-${label}`
+            }
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(choice)}
+          >
+            <span>{label}</span>
+            <ChevronRight aria-hidden="true" />
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -598,7 +637,6 @@ export function AssistantConversation({
   const [isRestoring, setRestoring] = useState(() =>
     Boolean(getActiveConversationId()),
   );
-  const [feedback, setFeedback] = useState<boolean | null>(null);
   const [escalationMessage, setEscalationMessage] = useState<string | null>(
     null,
   );
@@ -853,7 +891,6 @@ export function AssistantConversation({
       ]);
       setLastReply(response);
       setFailedSubmission(null);
-      setFeedback(null);
     },
     onError: (mutationError, variables) => {
       setError(errorDetails(mutationError, "conversation", authenticated));
@@ -872,7 +909,6 @@ export function AssistantConversation({
       setFailedSubmission(null);
       setFailedReset(false);
       setError(null);
-      setFeedback(null);
       setEscalationMessage(null);
       setRetryTicketPayload(null);
       setConversionConflict(false);
@@ -888,16 +924,6 @@ export function AssistantConversation({
         requestId: null,
       });
     },
-  });
-
-  const feedbackMutation = useMutation({
-    mutationFn: (isHelpful: boolean) => {
-      if (!conversation) throw new Error("No active conversation");
-      return api.chat.feedback(conversation.id, { is_helpful: isHelpful });
-    },
-    onSuccess: (_response, isHelpful) => setFeedback(isHelpful),
-    onError: (mutationError) =>
-      setError(errorDetails(mutationError, "conversation", authenticated)),
   });
 
   const escalate = useMutation({
@@ -1064,6 +1090,16 @@ export function AssistantConversation({
   const responseStatus = lastReply
     ? getAssistantResponseStatus(lastReply)
     : null;
+  const clarificationChoices = getAssistantClarificationChoices(
+    currentUi?.options ?? [],
+    lastReply?.clarification_options ?? [],
+  );
+  const inlineClarificationOptionsVisible = Boolean(
+    clarificationChoices.length > 0 &&
+      replyPresentation?.needsClarification &&
+      messages.at(-1)?.sender === "bot" &&
+      messages.at(-1)?.id === lastReply?.bot_message.id,
+  );
   const ticketQueryPresentation = lastReply
     ? getAssistantTicketQueryPresentation(lastReply)
     : null;
@@ -1252,7 +1288,7 @@ export function AssistantConversation({
                   </p>
                   {isLatestReply ? (
                     <div className="assistant-message__details">
-                      {responseStatus ? (
+                      {responseStatus && !replyPresentation?.needsClarification ? (
                         <div
                           className="assistant-response-status"
                           role="status"
@@ -1265,23 +1301,22 @@ export function AssistantConversation({
                       {replyPresentation?.needsClarification ? (
                         <div className="assistant-clarification">
                           <strong>
-                            {lastReply?.clarification_options?.length
-                              ? "Para orientarte mejor, elige una opción:"
+                            {clarificationChoices.length
+                              ? "¿Te refieres a alguna de estas consultas?"
                               : "Para orientarte mejor, aclara un poco tu consulta."}
                           </strong>
-                          {lastReply?.clarification_options?.length ? (
-                            <div>
-                              {lastReply.clarification_options.map((option) => (
-                                <button
-                                  key={option}
-                                  type="button"
-                                  disabled={isRestoring || chat.isPending}
-                                  onClick={() => submit(option)}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                            </div>
+                          {clarificationChoices.length ? (
+                            <AssistantClarificationOptions
+                              choices={clarificationChoices}
+                              disabled={
+                                isRestoring || chat.isPending || terminalConversation
+                              }
+                              onSelect={(choice) =>
+                                choice.kind === "structured"
+                                  ? submitOption(choice.option)
+                                  : submit(choice.label)
+                              }
+                            />
                           ) : null}
                         </div>
                       ) : null}
@@ -1353,35 +1388,6 @@ export function AssistantConversation({
                             })}
                           </ul>
                         </details>
-                      ) : null}
-
-                      {lastReply ? (
-                        <div className="assistant-reply-actions">
-                          <span>¿Te ayudó esta respuesta?</span>
-                          <button
-                            type="button"
-                            aria-label="La respuesta fue útil"
-                            aria-pressed={feedback === true}
-                            disabled={feedbackMutation.isPending}
-                            onClick={() => feedbackMutation.mutate(true)}
-                          >
-                            <ThumbsUp aria-hidden="true" /> Sí
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="La respuesta no fue útil"
-                            aria-pressed={feedback === false}
-                            disabled={feedbackMutation.isPending}
-                            onClick={() => feedbackMutation.mutate(false)}
-                          >
-                            <ThumbsDown aria-hidden="true" /> No
-                          </button>
-                          {feedback !== null ? (
-                            <small>
-                              <Check aria-hidden="true" /> Gracias por tu opinión.
-                            </small>
-                          ) : null}
-                        </div>
                       ) : null}
 
                       {conversation &&
@@ -1466,7 +1472,9 @@ export function AssistantConversation({
           />
         )}
 
-        {messages.length > 0 && conversation?.menu_open ? (
+        {messages.length > 0 &&
+        conversation?.menu_open &&
+        !inlineClarificationOptionsVisible ? (
           currentUi?.options?.length ? (
             <AssistantInteractiveOptions
               ui={currentUi}
@@ -1483,6 +1491,7 @@ export function AssistantConversation({
 
         {messages.length > 0 &&
         !conversation?.menu_open &&
+        !inlineClarificationOptionsVisible &&
         currentUi?.options?.length ? (
           <AssistantInteractiveOptions
             ui={currentUi}

@@ -1,5 +1,6 @@
 import type {
   BotMessageResponse,
+  ChatbotUIOption,
   ChatbotTicketDraft,
   ChatbotTicketDraftField,
   TicketCreateInput,
@@ -60,6 +61,44 @@ export interface AssistantReplyPresentation {
 export type AssistantResponseStatus = "ai" | "fallback" | null;
 
 export type AssistantRequestContext = "conversation" | "ticket";
+
+export type AssistantClarificationChoice =
+  | { readonly kind: "structured"; readonly option: ChatbotUIOption }
+  | { readonly kind: "text"; readonly label: string };
+
+function normalizeClarificationLabel(label: string): string {
+  return label
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("es-PE")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+export function getAssistantClarificationChoices(
+  structuredOptions: readonly ChatbotUIOption[],
+  clarificationOptions: readonly string[] = [],
+): readonly AssistantClarificationChoice[] {
+  const choices: AssistantClarificationChoice[] = [];
+  const seenLabels = new Set<string>();
+
+  for (const option of structuredOptions) {
+    const normalizedLabel = normalizeClarificationLabel(option.label);
+    if (!normalizedLabel || seenLabels.has(normalizedLabel)) continue;
+    seenLabels.add(normalizedLabel);
+    choices.push({ kind: "structured", option });
+  }
+
+  for (const label of clarificationOptions) {
+    const trimmedLabel = label.trim();
+    const normalizedLabel = normalizeClarificationLabel(trimmedLabel);
+    if (!normalizedLabel || seenLabels.has(normalizedLabel)) continue;
+    seenLabels.add(normalizedLabel);
+    choices.push({ kind: "text", label: trimmedLabel });
+  }
+
+  return choices;
+}
 
 const assistantCategoryLabels: Record<string, string> = {
   TARJETAS: "tarjetas",

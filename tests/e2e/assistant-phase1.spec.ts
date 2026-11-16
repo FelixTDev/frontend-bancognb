@@ -168,6 +168,183 @@ async function installCreateAndMessageRoutes(
   return () => sent;
 }
 
+test("combina las opciones de aclaración, conserva el option_id y oculta el feedback", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "tablet", "La revisión visual se enfoca en escritorio y móvil.");
+  await page.setViewportSize(
+    testInfo.project.name === "mobile"
+      ? { width: 375, height: 812 }
+      : { width: 1440, height: 900 },
+  );
+
+  const unhandled = await openAssistant(page, false);
+  const sentBodies: Record<string, unknown>[] = [];
+  await page.route("**/api/v1/chat/conversations", (route) =>
+    fulfillJson(route, 201, conversation(conversationId)),
+  );
+  await page.route(
+    "**/api/v1/chat/conversations/*/messages",
+    async (route) => {
+      sentBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (sentBodies.length === 1) {
+        await fulfillJson(
+          route,
+          200,
+          reply("ASK_CLARIFICATION", {
+            bot_message: message(
+              "clarification-with-choices",
+              "BOT",
+              "Para orientarte mejor, elige una opción.",
+            ),
+            requires_clarification: true,
+            clarification_options: [
+              " COMO consulto el saldo de mi cuenta!!! ",
+              "COMO ACTUALIZO MIS DATOS!!!",
+              "¿Cuándo se actualiza el saldo?",
+            ],
+            fallback_reason: "LOW_CONFIDENCE",
+            response_source: "FALLBACK",
+            ui: {
+              type: "FAQ_CHOICES",
+              menu_id: "faq:balance",
+              options: [
+                {
+                  id: "faq:balance",
+                  label: "¿Cómo consulto el saldo de mi cuenta?",
+                  action: "SELECT_FAQ",
+                },
+                {
+                  id: "faq:update-details",
+                  label: "¿Cómo actualizo mis datos?",
+                  action: "SELECT_FAQ",
+                },
+              ],
+            },
+          }),
+        );
+        return;
+      }
+
+      await fulfillJson(
+        route,
+        200,
+        reply("NONE", {
+          bot_message: message(
+            "faq-answer-with-source",
+            "BOT",
+            "Puedes consultar tus saldos desde la Banca por Internet.",
+          ),
+          fallback_reason: null,
+          response_source: "DETERMINISTIC",
+          sources: [
+            {
+              title: "Banca por Internet",
+              category: "Cuentas",
+              url: "https://www.bancognb.com.pe/inicio/banca-personas/cuentas",
+              verified_at: "2026-11-01T00:00:00Z",
+            },
+          ],
+        }),
+      );
+    },
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "Necesito consultar mi cuenta");
+
+  const clarification = widget.locator(".assistant-clarification");
+  const choices = clarification.locator(".assistant-clarification__choices");
+  await expect(
+    clarification.getByText("¿Te refieres a alguna de estas consultas?"),
+  ).toBeVisible();
+  await expect(choices).toHaveCount(1);
+  await expect(choices.getByRole("button")).toHaveCount(3);
+  await expect(
+    choices.getByRole("button", {
+      name: "¿Cómo consulto el saldo de mi cuenta?",
+    }),
+  ).toHaveCount(1);
+  await expect(
+    choices.getByRole("button", { name: "¿Cómo actualizo mis datos?" }),
+  ).toHaveCount(1);
+  await expect(
+    choices.getByRole("button", { name: "¿Cuándo se actualiza el saldo?" }),
+  ).toHaveCount(1);
+  await expect(widget.locator(".assistant-interactive-options")).toHaveCount(0);
+  await expect(widget.locator(".assistant-response-status")).toHaveCount(0);
+  await expect(widget.getByText("¿Te ayudó esta respuesta?")).toHaveCount(0);
+  await expect(widget.getByRole("button", { name: "La respuesta fue útil" })).toHaveCount(0);
+  await expect(widget.getByRole("button", { name: "La respuesta no fue útil" })).toHaveCount(0);
+  await widget.screenshot({
+    path: testInfo.outputPath("assistant-clarification.png"),
+  });
+
+  await choices
+    .getByRole("button", { name: "¿Cómo consulto el saldo de mi cuenta?" })
+    .click();
+  await expect(
+    widget.getByText("Puedes consultar tus saldos desde la Banca por Internet."),
+  ).toBeVisible();
+  expect(sentBodies).toEqual([
+    { content: "Necesito consultar mi cuenta" },
+    { option_id: "faq:balance" },
+  ]);
+  await expect(widget.getByText("¿Te ayudó esta respuesta?")).toHaveCount(0);
+  await widget.locator(".assistant-sources > summary").click();
+  await expect(
+    widget.getByRole("link", { name: "Banca por Internet" }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.bancognb.com.pe/inicio/banca-personas/cuentas",
+  );
+  expect(unhandled).toEqual([]);
+});
+
+test("mantiene las opciones antiguas de aclaración que solo incluyen texto", async ({
+  page,
+}) => {
+  const unhandled = await openAssistant(page, false);
+  const sentBodies: Record<string, unknown>[] = [];
+  await page.route("**/api/v1/chat/conversations", (route) =>
+    fulfillJson(route, 201, conversation(conversationId)),
+  );
+  await page.route(
+    "**/api/v1/chat/conversations/*/messages",
+    async (route) => {
+      sentBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      await fulfillJson(
+        route,
+        200,
+        reply("ASK_CLARIFICATION", {
+          bot_message: message(
+            "legacy-clarification",
+            "BOT",
+            "¿Qué consulta necesitas realizar?",
+          ),
+          requires_clarification: true,
+          clarification_options: ["Consultar un saldo"],
+          fallback_reason: "LOW_CONFIDENCE",
+          response_source: "FALLBACK",
+        }),
+      );
+    },
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "Quiero saber de mi cuenta");
+  const clarification = widget.locator(".assistant-clarification");
+  const choices = clarification.locator(".assistant-clarification__choices");
+  await expect(choices.getByRole("button", { name: "Consultar un saldo" })).toBeVisible();
+  await expect(widget.locator(".assistant-interactive-options")).toHaveCount(0);
+  await expect(widget.getByText("¿Te ayudó esta respuesta?")).toHaveCount(0);
+
+  await choices.getByRole("button", { name: "Consultar un saldo" }).click();
+  await expect.poll(() => sentBodies.length).toBe(2);
+  expect(sentBodies[1]).toEqual({ content: "Consultar un saldo" });
+  expect(unhandled).toEqual([]);
+});
+
 test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", async ({
   page,
 }) => {

@@ -5245,7 +5245,6 @@ p {
   gap: var(--space-2);
 }
 .assistant-examples button,
-.assistant-clarification button,
 .assistant-reply-actions > button {
   min-height: 42px;
   display: inline-flex;
@@ -5260,7 +5259,6 @@ p {
   border-radius: var(--radius-sm);
 }
 .assistant-examples button:hover,
-.assistant-clarification button:hover,
 .assistant-reply-actions > button:hover {
   background: var(--color-blue-100);
   border-color: var(--color-blue-700);
@@ -5404,6 +5402,58 @@ p {
 .assistant-clarification {
   display: grid;
   gap: var(--space-2);
+}
+.assistant-clarification > strong {
+  color: var(--color-navy-900);
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+.assistant-clarification__choices {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.assistant-clarification__choices button {
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.55rem 0.7rem;
+  color: var(--color-navy-900);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--color-blue-100) 36%, white);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.assistant-clarification__choices button:hover:not(:disabled) {
+  color: var(--color-blue-800);
+  background: var(--color-blue-100);
+  border-color: var(--color-blue-700);
+}
+.assistant-clarification__choices button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.assistant-clarification__choices button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.assistant-clarification__choices button svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-blue-700);
 }
 .assistant-message__details > .assistant-clarification,
 .assistant-message__details > .assistant-ticket-query:not(.assistant-auth-prompt),
@@ -5567,7 +5617,6 @@ p {
   color: var(--color-ink-muted);
   font-size: 0.76rem;
 }
-.assistant-clarification > div,
 .assistant-reply-actions,
 .assistant-followup {
   display: flex;

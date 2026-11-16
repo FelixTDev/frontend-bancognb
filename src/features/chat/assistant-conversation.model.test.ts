@@ -1,11 +1,83 @@
 import { describe, expect, it } from "vitest";
-import type { BotMessageResponse } from "../../shared/api/endpoints";
+import type {
+  BotMessageResponse,
+  ChatbotUIOption,
+} from "../../shared/api/endpoints";
 import {
+  getAssistantClarificationChoices,
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
 } from "./assistant-conversation.model";
+
+const structuredChoice = (
+  id: string,
+  label: string,
+  action: ChatbotUIOption["action"],
+) => ({
+  id,
+  label,
+  action,
+});
+
+describe("assistant clarification choices", () => {
+  it("prefers a structured choice when its label matches a clarification", () => {
+    const structured = structuredChoice(
+      "faq:balance",
+      "¿Cómo consulto el saldo de mi cuenta?",
+      "SELECT_FAQ",
+    );
+
+    expect(
+      getAssistantClarificationChoices(
+        [structured],
+        ["como consulto el saldo de mi cuenta"],
+      ),
+    ).toEqual([{ kind: "structured", option: structured }]);
+  });
+
+  it("deduplicates case, accents, punctuation, and whitespace", () => {
+    expect(
+      getAssistantClarificationChoices(
+        [
+          structuredChoice("faq:one", "¿Cómo consulto el saldo?", "SELECT_FAQ"),
+          structuredChoice("faq:two", "COMO   CONSULTO EL SALDO!!!", "SELECT_FAQ"),
+        ],
+        ["  Cómo consulto el saldo...  "],
+      ),
+    ).toEqual([
+      {
+        kind: "structured",
+        option: structuredChoice("faq:one", "¿Cómo consulto el saldo?", "SELECT_FAQ"),
+      },
+    ]);
+  });
+
+  it("combines distinct structured and legacy clarification choices", () => {
+    const structured = structuredChoice(
+      "faq:balance",
+      "Consultar saldo",
+      "SELECT_FAQ",
+    );
+
+    expect(
+      getAssistantClarificationChoices(
+        [structured],
+        ["Consultar saldo", "Actualizar mis datos"],
+      ),
+    ).toEqual([
+      { kind: "structured", option: structured },
+      { kind: "text", label: "Actualizar mis datos" },
+    ]);
+  });
+
+  it("keeps legacy clarification choices usable without structured options", () => {
+    expect(
+      getAssistantClarificationChoices([], ["Consultar un saldo"]),
+    ).toEqual([{ kind: "text", label: "Consultar un saldo" }]);
+  });
+});
 
 const makeReply = (
   overrides: Partial<BotMessageResponse> = {},
