@@ -5482,6 +5482,12 @@ p {
 .assistant-code-clarification > label {
   font-weight: 750;
 }
+.assistant-code-clarification__prompt {
+  margin: 0;
+  color: var(--color-navy-800);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
 .assistant-code-clarification__controls {
   display: flex;
   align-items: center;

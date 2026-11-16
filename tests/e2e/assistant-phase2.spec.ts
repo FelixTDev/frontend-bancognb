@@ -484,6 +484,78 @@ test("solicita un código faltante y envía el código al flujo normal del chat"
   expect(mock.unhandledMutations).toEqual([]);
 });
 
+test("una consulta de ticket fallida conserva el formulario y solicita el código completo", async ({
+  page,
+}) => {
+  const mock = await openAssistant(page);
+  mock.setResponder((content) => {
+    if (content === "¿En qué estado está mi ticket?") {
+      return reply(
+        "CLARIFY_TICKET_CODE",
+        {
+          query_type: "CLARIFY_TICKET_CODE",
+          authentication_required: false,
+          tickets: [],
+        },
+        "Necesito el código de seguimiento para consultar el estado.",
+        "ticket-code-prompt",
+      );
+    }
+    if (content === "TCK-COMPLETO-123") {
+      return reply(
+        "TICKET_STATUS",
+        {
+          query_type: "TICKET_STATUS",
+          authentication_required: false,
+          found: true,
+          ticket: ticket({ tracking_code: content }),
+          tickets: [],
+        },
+        "Encontré tu ticket.",
+        "complete-ticket-code-answer",
+      );
+    }
+    return {
+      status: 409,
+      payload: {
+        code: "CHAT_STATE_CHANGED",
+        message: "La conversación cambió.",
+      },
+    };
+  });
+
+  await sendMessage(page, "¿En qué estado está mi ticket?");
+  const codeInput = page.getByRole("textbox", {
+    name: "Ingresa un código de seguimiento",
+  });
+  await expect(codeInput).toBeVisible();
+  await codeInput.fill("TCK-PARCIAL");
+  await page.getByRole("button", { name: "Consultar código" }).click();
+
+  await expect(
+    page.getByText(/ingresa el código completo de seguimiento/i),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Ingresa un código de seguimiento" }),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reintentar" })).toHaveCount(0);
+
+  await page
+    .getByRole("textbox", { name: "Ingresa un código de seguimiento" })
+    .fill("TCK-COMPLETO-123");
+  await page.getByRole("button", { name: "Consultar código" }).click();
+  await expect(page.locator(".assistant-ticket-card__identity code")).toHaveText(
+    "TCK-COMPLETO-123",
+  );
+  expect(mock.messageBodies).toEqual([
+    "¿En qué estado está mi ticket?",
+    "TCK-PARCIAL",
+    "TCK-COMPLETO-123",
+  ]);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
 test("muestra respuesta del asesor y tickets que esperan una acción del cliente", async ({
   page,
 }) => {

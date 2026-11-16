@@ -596,6 +596,113 @@ test("muestra opciones del contrato y envía el option_id seleccionado", async (
   expect(unhandled).toEqual([]);
 });
 
+test("un option_id vencido recarga la conversación y pide elegir una opción vigente", async ({
+  page,
+}) => {
+  const unhandled = await openAssistant(page, false);
+  const sentBodies: Record<string, unknown>[] = [];
+  let conversationReads = 0;
+  await page.route("**/api/v1/chat/conversations", (route) =>
+    fulfillJson(route, 201, conversation(conversationId)),
+  );
+  await page.route(
+    `**/api/v1/chat/conversations/${conversationId}`,
+    async (route) => {
+      conversationReads += 1;
+      await fulfillJson(
+        route,
+        200,
+        {
+          ...conversation(conversationId, [
+            message("original-user", "USER", "Quiero consultar las FAQ"),
+            message("refreshed-menu-message", "BOT", "Las opciones se actualizaron."),
+          ]),
+          menu_open: false,
+          ui: {
+            type: "FAQ_CATEGORY_CHOICES",
+            menu_id: "faq:refreshed",
+            options: [
+              {
+                id: "category:fresh",
+                label: "Tarjetas",
+                action: "SHOW_FAQ_CATEGORY",
+              },
+            ],
+          },
+        },
+      );
+    },
+  );
+  await page.route(
+    "**/api/v1/chat/conversations/*/messages",
+    async (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      sentBodies.push(body);
+      if ("option_id" in body && body.option_id === "category:expired") {
+        await fulfillJson(route, 409, {
+          code: "CHAT_STATE_CHANGED",
+          message: "La conversación cambió.",
+        });
+        return;
+      }
+
+      await fulfillJson(
+        route,
+        200,
+        "option_id" in body
+          ? reply("NONE", {
+              bot_message: message(
+                "fresh-category-reply",
+                "BOT",
+                "Opciones actualizadas correctamente.",
+              ),
+            })
+          : reply("ASK_CLARIFICATION", {
+              bot_message: message(
+                "expired-menu-reply",
+                "BOT",
+                "Elige una opción para continuar.",
+              ),
+              requires_clarification: true,
+              ui: {
+                type: "FAQ_CATEGORY_CHOICES",
+                menu_id: "faq:expired",
+                options: [
+                  {
+                    id: "category:expired",
+                    label: "Opción vencida",
+                    action: "SHOW_FAQ_CATEGORY",
+                  },
+                ],
+              },
+            }),
+      );
+    },
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "Quiero consultar las FAQ");
+  await widget.getByRole("button", { name: "Opción vencida" }).click();
+
+  await expect.poll(() => conversationReads).toBe(1);
+  await expect(widget.getByText("Las opciones se actualizaron.")).toBeVisible();
+  await expect(widget.getByRole("button", { name: "Tarjetas" })).toBeVisible();
+  await expect(widget.getByRole("button", { name: "Opción vencida" })).toHaveCount(0);
+  await expect(widget.getByRole("button", { name: "Reintentar" })).toHaveCount(0);
+  await expect(
+    widget.getByText("La conversación cambió. Elige una opción vigente para continuar."),
+  ).toBeVisible();
+
+  await widget.getByRole("button", { name: "Tarjetas" }).click();
+  await expect(widget.getByText("Opciones actualizadas correctamente.")).toBeVisible();
+  expect(sentBodies).toEqual([
+    { content: "Quiero consultar las FAQ" },
+    { option_id: "category:expired" },
+    { option_id: "category:fresh" },
+  ]);
+  expect(unhandled).toEqual([]);
+});
+
 test("restaura las opciones interactivas persistidas por el backend", async ({
   page,
 }) => {

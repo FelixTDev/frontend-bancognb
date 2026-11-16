@@ -94,6 +94,7 @@ interface ChatSubmission {
   readonly body: ChatMessageCreateInput;
   readonly displayContent: string;
   readonly appendUser: boolean;
+  readonly kind?: "ticket-code";
 }
 
 const endConversationCommands = new Set([
@@ -418,11 +419,13 @@ function AssistantTicketQueryResult({
   disabled,
   onRequestPage,
   onSubmitTicketCode,
+  ticketCodePrompt,
 }: {
   readonly presentation: AssistantTicketQueryPresentation;
   readonly disabled: boolean;
   readonly onRequestPage: (page: number) => void;
   readonly onSubmitTicketCode: (code: string) => void;
+  readonly ticketCodePrompt: string | null;
 }) {
   switch (presentation.kind) {
     case "authentication":
@@ -462,6 +465,11 @@ function AssistantTicketQueryResult({
           <label htmlFor="assistant-ticket-code">
             Ingresa un código de seguimiento
           </label>
+          {ticketCodePrompt ? (
+            <p className="assistant-code-clarification__prompt" role="status">
+              {ticketCodePrompt}
+            </p>
+          ) : null}
           <div className="assistant-code-clarification__controls">
             <input
               id="assistant-ticket-code"
@@ -634,6 +642,7 @@ export function AssistantConversation({
   const [error, setError] = useState<ReturnType<typeof errorDetails> | null>(
     null,
   );
+  const [ticketCodePrompt, setTicketCodePrompt] = useState<string | null>(null);
   const [isRestoring, setRestoring] = useState(() =>
     Boolean(getActiveConversationId()),
   );
@@ -863,6 +872,7 @@ export function AssistantConversation({
       setFailedReset(false);
       setEscalationMessage(null);
       setFailedSubmission(null);
+      setTicketCodePrompt(null);
       if (appendUser) {
         setMessages((current) => [
           ...current,
@@ -892,7 +902,83 @@ export function AssistantConversation({
       setLastReply(response);
       setFailedSubmission(null);
     },
-    onError: (mutationError, variables) => {
+    onError: async (mutationError, variables) => {
+      if (
+        variables.body.option_id &&
+        mutationError instanceof ApiError &&
+        mutationError.status === 409
+      ) {
+        setError(null);
+        setFailedSubmission(null);
+        setTicketCodePrompt(null);
+
+        if (!conversation) {
+          setLastReply(null);
+          setError(errorDetails(mutationError, "conversation", authenticated));
+          return;
+        }
+
+        try {
+          const refreshed = await api.chat.get(conversation.id);
+          const hasCurrentOptions = Boolean(refreshed.ui?.options?.length);
+          setConversation(refreshed);
+          setMessages([
+            ...toVisibleMessages(refreshed),
+            {
+              id: crypto.randomUUID(),
+              content: hasCurrentOptions
+                ? "La conversación cambió. Elige una opción vigente para continuar."
+                : "La conversación cambió. Puedes escribir tu consulta nuevamente para continuar.",
+              sender: "bot",
+            },
+          ]);
+          setLastReply(null);
+          setValue("");
+          setConversionConflict(false);
+        } catch (refreshError) {
+          setConversation((current) =>
+            current ? { ...current, menu_open: false, ui: null } : current,
+          );
+          setMessages((current) => {
+            const latest = current.at(-1);
+            const withoutExpiredSelection =
+              latest?.sender === "user" &&
+              latest.content === variables.displayContent
+                ? current.slice(0, -1)
+                : current;
+            return [
+              ...withoutExpiredSelection,
+              {
+                id: crypto.randomUUID(),
+                content:
+                  "La conversación cambió y no pudimos actualizar las opciones. Vuelve a escribir tu consulta para continuar.",
+                sender: "bot",
+              },
+            ];
+          });
+          setLastReply(null);
+          setFailedSubmission(null);
+          setError(errorDetails(refreshError, "conversation", authenticated));
+        }
+        return;
+      }
+
+      if (variables.kind === "ticket-code") {
+        setMessages((current) => {
+          const latest = current.at(-1);
+          return latest?.sender === "user" &&
+            latest.content === variables.displayContent
+            ? current.slice(0, -1)
+            : current;
+        });
+        setTicketCodePrompt(
+          "No pudimos completar la consulta. Ingresa el código completo de seguimiento y vuelve a intentarlo.",
+        );
+        setError(null);
+        setFailedSubmission(null);
+        return;
+      }
+
       setError(errorDetails(mutationError, "conversation", authenticated));
       setFailedSubmission(variables);
     },
@@ -909,6 +995,7 @@ export function AssistantConversation({
       setFailedSubmission(null);
       setFailedReset(false);
       setError(null);
+      setTicketCodePrompt(null);
       setEscalationMessage(null);
       setRetryTicketPayload(null);
       setConversionConflict(false);
@@ -995,7 +1082,11 @@ export function AssistantConversation({
   });
 
   const submit = useCallback(
-    (content: string, appendUser = true) => {
+    (
+      content: string,
+      appendUser = true,
+      kind?: ChatSubmission["kind"],
+    ) => {
       const normalized = content.trim();
       if (
         !normalized ||
@@ -1019,6 +1110,7 @@ export function AssistantConversation({
         body: { content: normalized },
         displayContent: normalized,
         appendUser,
+        kind,
       });
     },
     [chat, isRestoring, reset.isPending, terminalConversation],
@@ -1331,7 +1423,10 @@ export function AssistantConversation({
                           onRequestPage={(page) =>
                             submit(`Muéstrame mis tickets recientes página ${page}`)
                           }
-                          onSubmitTicketCode={(code) => submit(code)}
+                          onSubmitTicketCode={(code) =>
+                            submit(code, true, "ticket-code")
+                          }
+                          ticketCodePrompt={ticketCodePrompt}
                         />
                       ) : null}
 
