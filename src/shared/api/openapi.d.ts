@@ -434,6 +434,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/admin/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chatbot Operational Metrics */
+        get: operations["chatbot_operational_metrics_api_v1_chat_admin_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/conversations": {
         parameters: {
             query?: never;
@@ -756,6 +773,23 @@ export interface paths {
         put?: never;
         /** Close Ticket */
         post: operations["close_ticket_api_v1_tickets__ticket_id__close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tickets/{ticket_id}/confirm-resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Ticket Resolution */
+        post: operations["confirm_ticket_resolution_api_v1_tickets__ticket_id__confirm_resolution_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1367,7 +1401,7 @@ export interface components {
             /** @description Opciones interactivas tipadas. option_id solo se acepta si la opción sigue perteneciendo al estado actual de la conversación. */
             ui?: components["schemas"]["ChatbotUI"] | null;
             /**
-             * @description Acción tipada que la interfaz puede presentar o ejecutar; nunca confirma por sí sola una conversión a ticket. Las acciones de consulta usan ticket_query como payload tipado. CONVERT_TO_TICKET se emite para un borrador listo y pendiente de confirmación explícita mediante el endpoint de conversión.
+             * @description Acción tipada que la interfaz puede presentar o ejecutar; nunca confirma por sí sola una conversión a ticket. Las acciones de consulta usan ticket_query como payload tipado. CONFIRM_TICKET aparece cuando el resumen requiere confirmación; CONVERT_TO_TICKET aparece solo después de confirmar el borrador.
              * @default NONE
              */
             suggested_action: components["schemas"]["ChatbotSuggestedAction"];
@@ -1376,6 +1410,10 @@ export interface components {
              * @description Acciones alternativas que la interfaz puede ofrecer cuando la consulta no tiene una respuesta confiable o requiere otro canal.
              */
             available_actions?: components["schemas"]["ChatbotAvailableAction"][];
+            /** Quick Replies */
+            quick_replies?: components["schemas"]["ChatbotQuickReply"][];
+            /** Proactive Notices */
+            proactive_notices?: components["schemas"]["ChatbotProactiveNotice"][];
             /**
              * @description Resultado acotado de una consulta autenticada de tickets. Se omite para respuestas que no consultan tickets. El tipo de consulta y suggested_action permiten al frontend actuar sin analizar el texto.
              * @example {
@@ -1480,7 +1518,7 @@ export interface components {
              *     }
              */
             ticket_query?: components["schemas"]["ChatbotTicketQuery"] | null;
-            /** @description Borrador estructurado del ticket. Solo READY_FOR_CONFIRMATION permite que la interfaz solicite confirmación en el endpoint de conversión. */
+            /** @description Borrador estructurado del ticket. READY_FOR_CONFIRMATION solicita una confirmación explícita; CONFIRMED permite la conversión a ticket. */
             ticket_draft?: components["schemas"]["ChatbotTicketDraft"];
             /**
              * Menu Open
@@ -1653,7 +1691,74 @@ export interface components {
          * ChatbotIntent
          * @enum {string}
          */
-        ChatbotIntent: "GREETING" | "SHOW_MENU" | "FAQ_QUERY" | "FAQ_DISCOVERY" | "FAQ_CATEGORY_DISCOVERY" | "FAQ_SUBCATEGORY_DISCOVERY" | "TICKET_QUERY" | "TICKET_DETAIL" | "CREATE_TICKET" | "TICKET_DRAFT_UPDATE" | "REQUEST_ADVISOR" | "CLARIFICATION" | "NAVIGATION" | "END_CONVERSATION" | "OUT_OF_SCOPE" | "UNKNOWN";
+        ChatbotIntent: "GREETING" | "SHOW_MENU" | "FAQ_QUERY" | "FAQ_DISCOVERY" | "FAQ_CATEGORY_DISCOVERY" | "FAQ_SUBCATEGORY_DISCOVERY" | "TICKET_QUERY" | "TICKET_DETAIL" | "CREATE_TICKET" | "TICKET_DRAFT_UPDATE" | "REQUEST_ADVISOR" | "FEEDBACK" | "CLARIFICATION" | "NAVIGATION" | "END_CONVERSATION" | "OUT_OF_SCOPE" | "UNKNOWN";
+        /** ChatbotOperationalMetrics */
+        ChatbotOperationalMetrics: {
+            /** Total Conversations */
+            total_conversations: number;
+            /** Conversations Ending In Ticket */
+            conversations_ending_in_ticket: number;
+            /** Tickets Created */
+            tickets_created: number;
+            /** Escalation Requests */
+            escalation_requests: number;
+            /** Escalation Rate Percent */
+            escalation_rate_percent: number;
+            /** Fallback By Reason */
+            fallback_by_reason?: {
+                [key: string]: number;
+            };
+            /** Fallback Rate By Reason Percent */
+            fallback_rate_by_reason_percent?: {
+                [key: string]: number;
+            };
+            /** Out Of Context By Subrule */
+            out_of_context_by_subrule?: {
+                [key: string]: number;
+            };
+            /** Intent Counts */
+            intent_counts?: {
+                [key: string]: number;
+            };
+            /** Provider Calls Today */
+            provider_calls_today: number;
+            /** Tokens Today */
+            tokens_today: number;
+            /** Estimated Cost Today Usd */
+            estimated_cost_today_usd: number;
+            /** Total Call Cap */
+            total_call_cap: number;
+            /** Total Token Cap */
+            total_token_cap: number;
+            /** Total Estimated Cost Cap Usd */
+            total_estimated_cost_cap_usd: number;
+            /** Max Output Tokens Per Call */
+            max_output_tokens_per_call: number;
+        };
+        /** ChatbotProactiveNotice */
+        ChatbotProactiveNotice: {
+            type: components["schemas"]["ChatbotProactiveNoticeType"];
+            /** Ticket Id */
+            ticket_id: string;
+            /** Tracking Code */
+            tracking_code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * ChatbotProactiveNoticeType
+         * @enum {string}
+         */
+        ChatbotProactiveNoticeType: "CLIENT_ACTION_REQUIRED" | "RESOLVED_CONFIRMATION_REQUIRED";
+        /** ChatbotQuickReply */
+        ChatbotQuickReply: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Content */
+            content: string;
+        };
         /**
          * ChatbotResponseSource
          * @enum {string}
@@ -1674,7 +1779,7 @@ export interface components {
          * ChatbotSuggestedAction
          * @enum {string}
          */
-        ChatbotSuggestedAction: "NONE" | "ASK_CLARIFICATION" | "CONVERT_TO_TICKET" | "CONTACT_ADVISOR" | "AUTHENTICATION_REQUIRED" | "LIST_MY_TICKETS" | "COUNT_MY_TICKETS" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "LATEST_ADVISOR_RESPONSE" | "CLIENT_ACTION_REQUIRED" | "CLARIFY_TICKET_CODE" | "SHOW_MENU" | "END_CONVERSATION";
+        ChatbotSuggestedAction: "NONE" | "ASK_CLARIFICATION" | "CREATE_TICKET" | "CONFIRM_TICKET" | "CONVERT_TO_TICKET" | "CONTACT_ADVISOR" | "AUTHENTICATION_REQUIRED" | "LIST_MY_TICKETS" | "COUNT_MY_TICKETS" | "TICKET_STATUS" | "ADVISOR_RESPONSE_STATUS" | "LATEST_ADVISOR_RESPONSE" | "CLIENT_ACTION_REQUIRED" | "CLARIFY_TICKET_CODE" | "SHOW_MENU" | "END_CONVERSATION";
         /**
          * ChatbotTicketAssignmentStatus
          * @enum {string}
@@ -1714,6 +1819,8 @@ export interface components {
         ChatbotTicketDraft: {
             /** @default INACTIVE */
             status: components["schemas"]["ChatbotTicketDraftStatus"];
+            /** Category Name */
+            category_name?: string | null;
             /**
              * Paused
              * @description Indica que el borrador se conserva mientras el cliente consulta otro tema; no confirma ni crea el ticket.
@@ -1757,7 +1864,7 @@ export interface components {
          * ChatbotTicketDraftStatus
          * @enum {string}
          */
-        ChatbotTicketDraftStatus: "INACTIVE" | "COLLECTING" | "READY_FOR_CONFIRMATION" | "CANCELLED";
+        ChatbotTicketDraftStatus: "INACTIVE" | "COLLECTING" | "READY_FOR_CONFIRMATION" | "CONFIRMED" | "CANCELLED";
         /** ChatbotTicketDraftValidationError */
         ChatbotTicketDraftValidationError: {
             field: components["schemas"]["ChatbotTicketDraftField"];
@@ -1913,6 +2020,8 @@ export interface components {
             ui?: components["schemas"]["ChatbotUI"] | null;
             /** @description Resumen del ticket asociado; nulo si la conversación no fue convertida. */
             converted_ticket?: components["schemas"]["ChatbotConvertedTicketSummary"] | null;
+            /** Proactive Notices */
+            proactive_notices?: components["schemas"]["ChatbotProactiveNotice"][];
             /** Messages */
             messages?: components["schemas"]["ChatMessageRead"][];
         };
@@ -4392,6 +4501,89 @@ export interface operations {
             };
         };
     };
+    chatbot_operational_metrics_api_v1_chat_admin_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatbotOperationalMetrics"];
+                };
+            };
+            /** @description La solicitud no es válida. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Autenticación requerida. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No tienes permisos para realizar esta operación. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description El recurso solicitado no existe. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description La solicitud entra en conflicto con el estado actual. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description La solicitud contiene datos inválidos. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Se alcanzó el límite de solicitudes. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     create_conversation_api_v1_chat_conversations_post: {
         parameters: {
             query?: never;
@@ -6066,6 +6258,82 @@ export interface operations {
         };
     };
     close_ticket_api_v1_tickets__ticket_id__close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketRead"];
+                };
+            };
+            /** @description Autenticación requerida. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No tienes permisos para realizar esta operación. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description El recurso solicitado no existe. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description La solicitud entra en conflicto con el estado actual. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description La solicitud contiene datos inválidos. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Se alcanzó el límite de solicitudes. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_ticket_resolution_api_v1_tickets__ticket_id__confirm_resolution_post: {
         parameters: {
             query?: never;
             header?: never;

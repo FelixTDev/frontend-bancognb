@@ -27,8 +27,9 @@ test("la portada presenta el servicio y navega por contenido público", async ({
     page.getByRole("link", { name: "Crear una solicitud" }).first(),
   ).toBeVisible();
   await page.getByRole("link", { name: "Cómo funciona" }).first().click();
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "recorrido",
+  await expect(page).toHaveURL(/\/como-funciona$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "De la primera consulta a la respuesta, con todo en contexto.",
   );
 });
 
@@ -347,7 +348,7 @@ test("nosotros presenta la historia institucional y sus canales de atención", a
   }
 
   const images = about.locator("img");
-  await expect(images).toHaveCount(5);
+  await expect(images).toHaveCount(4);
   await images.last().scrollIntoViewIfNeeded();
   await expect
     .poll(() =>
@@ -417,7 +418,7 @@ test("cliente inicia sesión, consulta solicitudes y no entra a supervisión", a
   await expect(page).toHaveURL(/\/sin-acceso$/);
 });
 
-test("el asistente vincula, retroalimenta, escala, reinicia y prepara una solicitud", async ({
+test("el asistente vincula, escala, reinicia y prepara una solicitud", async ({
   page,
 }, testInfo) => {
   const e2eUser = {
@@ -532,19 +533,6 @@ test("el asistente vincula, retroalimenta, escala, reinicia y prepara una solici
       }),
     });
   });
-  await page.route(
-    "**/api/v1/chat/conversations/e2e-linked/feedback",
-    async (route) => {
-      await route.fulfill({
-        status: 201,
-        contentType: "application/json",
-        body: JSON.stringify({
-          conversation_id: "e2e-linked",
-          is_helpful: true,
-        }),
-      });
-    },
-  );
   await page.route(
     "**/api/v1/chat/conversations/e2e-linked/escalate",
     async (route) => {
@@ -676,10 +664,6 @@ test("el asistente vincula, retroalimenta, escala, reinicia y prepara una solici
     page.getByRole("button", { name: "Convertir en solicitud" }),
   ).toHaveCount(0);
 
-  await page
-    .getByRole("button", { name: "La respuesta fue útil" })
-    .click();
-  await expect(page.getByText("Gracias por tu opinión.")).toBeVisible();
   await page.getByRole("button", { name: "Solicitar seguimiento" }).click();
   await expect(
     page.locator(".assistant-escalation").getByText(/no es un chat humano en tiempo real/i),

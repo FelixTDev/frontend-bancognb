@@ -203,7 +203,9 @@ export function getAssistantRequestErrorMessage(
       : "No encontramos esta conversación. Puedes reiniciarla e intentarlo nuevamente.";
   }
   if (status === 409) {
-    return "La conversación ya cambió o ya tiene una solicitud. Revisa su estado antes de volver a intentarlo.";
+    return context === "ticket"
+      ? "La solicitud ya está registrada. Revisa su detalle antes de volver a intentarlo."
+      : "No pudimos procesar el mensaje con el estado actual de la conversación. Inténtalo nuevamente.";
   }
   if (status === 429) {
     return "Llegaste al límite de solicitudes. Espera un momento e inténtalo nuevamente.";
@@ -246,13 +248,35 @@ export function getAssistantReplyPresentation(
   };
 }
 
-export function getAssistantResponseStatus(
-  reply: Pick<BotMessageResponse, "response_source" | "fallback_reason">,
-): AssistantResponseStatus {
+export function getAssistantResponseStatus(reply: {
+  readonly response_source?: BotMessageResponse["response_source"] | null;
+  readonly fallback_reason?: BotMessageResponse["fallback_reason"];
+}): AssistantResponseStatus {
   if (reply.fallback_reason || reply.response_source === "FALLBACK") {
     return "fallback";
   }
   return reply.response_source === "AI" ? "ai" : null;
+}
+
+export function getSafeAssistantSourceUrl(
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" ||
+      !["bancognb.com.pe", "www.bancognb.com.pe"].includes(url.hostname) ||
+      url.username ||
+      url.password ||
+      url.port
+    ) {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
 }
 
 export function getAssistantTicketQueryPresentation(

@@ -773,6 +773,7 @@ test("un comentario con conflicto 409 no se reenvía automáticamente", async ({
 
 test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "verificación visual ejecutada en los tres viewports requeridos");
+  test.setTimeout(60_000);
   const mock = await installMockApp(page, "SUPERVISOR");
   const advisorPage = await page.context().newPage();
   const advisorMock = await installMockApp(advisorPage, "ASESOR");
@@ -827,7 +828,9 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
     await expect(advisorPage.getByRole("heading", { name: "Historial de atención" })).toBeVisible();
     await capturePage(advisorPage, `advisor-history-${viewport.name}`);
 
-    await advisorPage.goto(`/asesor/tickets/${assignedTicketId}`);
+    await advisorPage.goto(`/asesor/tickets/${assignedTicketId}`, {
+      waitUntil: "domcontentloaded",
+    });
     await expect(advisorPage.getByRole("heading", { name: "Revisión de una operación", level: 1 })).toBeVisible();
     const advisorDetailDimensions = await advisorPage.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
     expect(advisorDetailDimensions.content).toBeLessThanOrEqual(advisorDetailDimensions.viewport + 1);

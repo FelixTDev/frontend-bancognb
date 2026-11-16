@@ -9,6 +9,7 @@ import {
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
+  getSafeAssistantSourceUrl,
 } from "./assistant-conversation.model";
 
 const structuredChoice = (
@@ -215,6 +216,22 @@ describe("assistant response source status", () => {
         makeReply({ fallback_reason: null, response_source: "AI" }),
       ),
     ).toBe("ai");
+  });
+
+  it("keeps the verified recovery guide URL exactly as returned by the backend", () => {
+    const recoveryGuideUrl =
+      "https://www.bancognb.com.pe/main/download?file=peru%2Fbanca_personas%2Fguia-cambio-de-contrasenia.pdf";
+
+    expect(getSafeAssistantSourceUrl(recoveryGuideUrl)).toBe(recoveryGuideUrl);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "http://www.bancognb.com.pe/guia",
+    "https://example.com/guia",
+    "https://www.bancognb.com.pe.evil.test/guia",
+  ])("does not make an unsafe or unofficial source clickable: %s", (url) => {
+    expect(getSafeAssistantSourceUrl(url)).toBeNull();
   });
 
   it("labels a deterministic answer with a fallback reason without exposing it", () => {
@@ -513,7 +530,7 @@ describe("assistant request errors", () => {
     [401, "Tu sesión venció"],
     [403, "No tienes permisos"],
     [404, "No encontramos esta conversación"],
-    [409, "La conversación ya cambió"],
+    [409, "No pudimos procesar el mensaje"],
     [429, "límite de solicitudes"],
   ])("explains conversation query HTTP %i", (status, expected) => {
     expect(
@@ -525,7 +542,7 @@ describe("assistant request errors", () => {
     [401, "Tu sesión venció."],
     [403, "No tienes permisos"],
     [404, "No encontramos esta conversación"],
-    [409, "La conversación ya cambió"],
+    [409, "La solicitud ya está registrada"],
     [429, "límite de solicitudes"],
     [0, "No pudimos conectar"],
   ])("explains ticket conversion HTTP %i", (status, expected) => {
@@ -538,5 +555,11 @@ describe("assistant request errors", () => {
     expect(
       getAssistantRequestErrorMessage(503, "ticket", "Servicio no disponible"),
     ).toBe("Servicio no disponible");
+  });
+
+  it("reserves the stale-conversation message for expired structured options", () => {
+    expect(
+      getAssistantRequestErrorMessage(409, "conversation", "Conflicto"),
+    ).not.toContain("La conversación cambió");
   });
 });

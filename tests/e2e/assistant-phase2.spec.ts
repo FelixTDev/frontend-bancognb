@@ -112,6 +112,7 @@ async function installMockApi(
 ) {
   const responseHandler = { current: options.respond };
   const messageBodies: string[] = [];
+  const messagePayloads: Record<string, unknown>[] = [];
   const messagePaths: string[] = [];
   const unhandledMutations: string[] = [];
   const history: ReturnType<typeof message>[] = [];
@@ -132,7 +133,10 @@ async function installMockApi(
       return;
     }
     if (path.endsWith("/messages") && method === "POST") {
-      const content = (request.postDataJSON() as { content: string }).content;
+      const messagePayload = request.postDataJSON() as Record<string, unknown>;
+      messagePayloads.push(messagePayload);
+      const content =
+        typeof messagePayload.content === "string" ? messagePayload.content : "";
       const index = messageBodies.length;
       messageBodies.push(content);
       messagePaths.push(path);
@@ -206,6 +210,7 @@ async function installMockApi(
 
   return {
     messageBodies,
+    messagePayloads,
     messagePaths,
     unhandledMutations,
     setResponder: (respond: MockResponder) => {
@@ -445,7 +450,7 @@ test("muestra estado válido y conserva el mensaje neutral para códigos sin res
   expect(mock.unhandledMutations).toEqual([]);
 });
 
-test("solicita un código faltante y envía el código al flujo normal del chat", async ({
+test("solicita un código faltante y envía solo el texto al flujo normal del chat", async ({
   page,
 }) => {
   const mock = await openAssistant(page);
@@ -476,6 +481,10 @@ test("solicita un código faltante y envía el código al flujo normal del chat"
   expect(mock.messageBodies).toEqual([
     "¿En qué estado está mi ticket?",
     "TCK-UNICO-123",
+  ]);
+  expect(mock.messagePayloads).toEqual([
+    { content: "¿En qué estado está mi ticket?" },
+    { content: "TCK-UNICO-123" },
   ]);
   expect(mock.messagePaths).toEqual([
     `/api/v1/chat/conversations/${conversationId}/messages`,

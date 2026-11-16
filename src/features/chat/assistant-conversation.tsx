@@ -30,6 +30,7 @@ import {
   api,
   type BotMessageResponse,
   type ChatbotConvertedTicketSummary,
+  type ChatbotSource,
   type ChatbotUI,
   type ChatbotUIOption,
   type ChatMessageCreateInput,
@@ -39,11 +40,13 @@ import { ApiError } from "../../shared/api/http";
 import { Button, ResponsiveImage } from "../../shared/components/ui";
 import { formatCategoryDisplayName } from "../../shared/ticket-labels";
 import {
+  type AssistantResponseStatus,
   type AssistantClarificationChoice,
   type AssistantTicketQueryPresentation,
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
+  getSafeAssistantSourceUrl,
   getAssistantRequestErrorMessage,
   getAssistantClarificationChoices,
   formatAssistantMessage,
@@ -296,6 +299,8 @@ interface VisibleMessage {
   readonly id: string;
   readonly content: string;
   readonly sender: "user" | "bot";
+  readonly responseStatus?: AssistantResponseStatus;
+  readonly sources?: readonly ChatbotSource[];
 }
 
 interface AssistantConversationProps {
@@ -310,11 +315,22 @@ interface AssistantConversationProps {
 const toVisibleMessages = (
   conversation: Conversation,
 ): readonly VisibleMessage[] =>
-  (conversation.messages ?? []).map((message) => ({
-    id: message.id,
-    content: message.content,
-    sender: message.sender_type.toUpperCase() === "USER" ? "user" : "bot",
-  }));
+  (conversation.messages ?? []).map((message) => {
+    const sender =
+      message.sender_type.toUpperCase() === "USER" ? "user" : "bot";
+    return {
+      id: message.id,
+      content: message.content,
+      sender,
+      responseStatus:
+        sender === "bot"
+          ? getAssistantResponseStatus({
+              response_source: message.response_source,
+            })
+          : null,
+      sources: [],
+    };
+  });
 
 const toTranscript = (messages: readonly VisibleMessage[]): string =>
   messages
@@ -344,25 +360,6 @@ const errorDetails = (
     message: getAssistantRequestErrorMessage(-1, context, undefined, authenticated),
     requestId: null,
   };
-};
-
-const safeSourceUrl = (value: string | null | undefined): string | null => {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== "https:" ||
-      !["bancognb.com.pe", "www.bancognb.com.pe"].includes(url.hostname) ||
-      url.username ||
-      url.password ||
-      url.port
-    ) {
-      return null;
-    }
-    return url.href;
-  } catch {
-    return null;
-  }
 };
 
 const sourceVerificationLabel = (verifiedAt: string | null | undefined) => {
@@ -897,6 +894,8 @@ export function AssistantConversation({
           id: response.bot_message.id,
           content: response.bot_message.content,
           sender: "bot",
+          responseStatus: getAssistantResponseStatus(response),
+          sources: response.sources ?? [],
         },
       ]);
       setLastReply(response);
@@ -1179,9 +1178,6 @@ export function AssistantConversation({
         conversation?.status ?? lastReply.conversation_status ?? "",
       )
     : null;
-  const responseStatus = lastReply
-    ? getAssistantResponseStatus(lastReply)
-    : null;
   const clarificationChoices = getAssistantClarificationChoices(
     currentUi?.options ?? [],
     lastReply?.clarification_options ?? [],
@@ -1378,69 +1374,30 @@ export function AssistantConversation({
                       ? formatAssistantMessage(message.content)
                       : message.content}
                   </p>
-                  {isLatestReply ? (
+                  {message.sender === "bot" &&
+                  (message.responseStatus || message.sources?.length) ? (
                     <div className="assistant-message__details">
-                      {responseStatus && !replyPresentation?.needsClarification ? (
+                      {message.responseStatus ? (
                         <div
                           className="assistant-response-status"
                           role="status"
                         >
-                          {responseStatus === "ai"
+                          {message.responseStatus === "ai"
                             ? "Respuesta generada con IA."
                             : "Respuesta de respaldo. No se pudo validar una respuesta de IA."}
                         </div>
                       ) : null}
-                      {replyPresentation?.needsClarification ? (
-                        <div className="assistant-clarification">
-                          <strong>
-                            {clarificationChoices.length
-                              ? "¿Te refieres a alguna de estas consultas?"
-                              : "Para orientarte mejor, aclara un poco tu consulta."}
-                          </strong>
-                          {clarificationChoices.length ? (
-                            <AssistantClarificationOptions
-                              choices={clarificationChoices}
-                              disabled={
-                                isRestoring || chat.isPending || terminalConversation
-                              }
-                              onSelect={(choice) =>
-                                choice.kind === "structured"
-                                  ? submitOption(choice.option)
-                                  : submit(choice.label)
-                              }
-                            />
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      {renderTicketDraft()}
-
-                      {ticketQueryPresentation ? (
-                        <AssistantTicketQueryResult
-                          key={lastReply?.bot_message.id}
-                          presentation={ticketQueryPresentation}
-                          disabled={isRestoring || chat.isPending}
-                          onRequestPage={(page) =>
-                            submit(`Muéstrame mis tickets recientes página ${page}`)
-                          }
-                          onSubmitTicketCode={(code) =>
-                            submit(code, true, "ticket-code")
-                          }
-                          ticketCodePrompt={ticketCodePrompt}
-                        />
-                      ) : null}
-
-                      {lastReply?.sources?.length ? (
+                      {message.sources?.length ? (
                         <details className="assistant-sources">
                           <summary>
-                            {lastReply.sources.length === 1
+                            {message.sources.length === 1
                               ? "Ver fuente"
                               : "Ver fuentes"}
                             <ChevronDown aria-hidden="true" />
                           </summary>
                           <ul>
-                            {lastReply.sources.map((source, index) => {
-                              const href = safeSourceUrl(source.url);
+                            {message.sources.map((source, index) => {
+                              const href = getSafeAssistantSourceUrl(source.url);
                               const verifiedAt = sourceVerificationLabel(
                                 source.verified_at,
                               );
@@ -1483,6 +1440,49 @@ export function AssistantConversation({
                             })}
                           </ul>
                         </details>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {isLatestReply ? (
+                    <div className="assistant-message__details">
+                      {replyPresentation?.needsClarification ? (
+                        <div className="assistant-clarification">
+                          <strong>
+                            {clarificationChoices.length
+                              ? "¿Te refieres a alguna de estas consultas?"
+                              : "Para orientarte mejor, aclara un poco tu consulta."}
+                          </strong>
+                          {clarificationChoices.length ? (
+                            <AssistantClarificationOptions
+                              choices={clarificationChoices}
+                              disabled={
+                                isRestoring || chat.isPending || terminalConversation
+                              }
+                              onSelect={(choice) =>
+                                choice.kind === "structured"
+                                  ? submitOption(choice.option)
+                                  : submit(choice.label)
+                              }
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {renderTicketDraft()}
+
+                      {ticketQueryPresentation ? (
+                        <AssistantTicketQueryResult
+                          key={lastReply?.bot_message.id}
+                          presentation={ticketQueryPresentation}
+                          disabled={isRestoring || chat.isPending}
+                          onRequestPage={(page) =>
+                            submit(`Muéstrame mis tickets recientes página ${page}`)
+                          }
+                          onSubmitTicketCode={(code) =>
+                            submit(code, true, "ticket-code")
+                          }
+                          ticketCodePrompt={ticketCodePrompt}
+                        />
                       ) : null}
 
                       {conversation &&

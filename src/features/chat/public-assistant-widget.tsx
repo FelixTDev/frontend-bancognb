@@ -1,5 +1,5 @@
 import { Bot, MessageCircleMore, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AssistantConversation } from "./assistant-conversation";
 import { useModalFocus } from "../../shared/hooks/use-modal-focus";
 
@@ -12,6 +12,13 @@ export function requestOpenPublicAssistant() {
 export function PublicAssistantWidget() {
   const [isOpen, setOpen] = useState(false);
   const [isObstructed, setObstructed] = useState(false);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  useLayoutEffect(() => {
+    if (wasOpen.current && !isOpen) launcherRef.current?.focus();
+    wasOpen.current = isOpen;
+  }, [isOpen]);
 
   useEffect(() => {
     const handleOpen = () => setOpen(true);
@@ -59,6 +66,7 @@ export function PublicAssistantWidget() {
       {isOpen ? <WidgetDialog onClose={() => setOpen(false)} /> : null}
       {!isOpen ? (
         <button
+          ref={launcherRef}
           type="button"
           className="assistant-widget__launcher"
           aria-label="Abrir Asistente GNB"

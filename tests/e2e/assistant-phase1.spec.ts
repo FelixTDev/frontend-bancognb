@@ -63,6 +63,7 @@ function reply(
     requires_clarification: false,
     clarification_options: [],
     suggested_action: action,
+    menu_open: false,
     fallback_reason: null,
     conversation_status: "ACTIVE",
     response_source: "DETERMINISTIC",
@@ -272,7 +273,9 @@ test("combina las opciones de aclaración, conserva el option_id y oculta el fee
     choices.getByRole("button", { name: "¿Cuándo se actualiza el saldo?" }),
   ).toHaveCount(1);
   await expect(widget.locator(".assistant-interactive-options")).toHaveCount(0);
-  await expect(widget.locator(".assistant-response-status")).toHaveCount(0);
+  await expect(widget.locator(".assistant-response-status")).toHaveText(
+    "Respuesta de respaldo. No se pudo validar una respuesta de IA.",
+  );
   await expect(widget.getByText("¿Te ayudó esta respuesta?")).toHaveCount(0);
   await expect(widget.getByRole("button", { name: "La respuesta fue útil" })).toHaveCount(0);
   await expect(widget.getByRole("button", { name: "La respuesta no fue útil" })).toHaveCount(0);
@@ -700,6 +703,52 @@ test("un option_id vencido recarga la conversación y pide elegir una opción vi
     { option_id: "category:expired" },
     { option_id: "category:fresh" },
   ]);
+  expect(unhandled).toEqual([]);
+});
+
+test("un 409 de texto libre se muestra como conflicto sin tratarlo como opción vencida", async ({
+  page,
+}) => {
+  const unhandled = await openAssistant(page, false);
+  const sentBodies: Record<string, unknown>[] = [];
+  let conversationReads = 0;
+
+  await page.route("**/api/v1/chat/conversations", (route) =>
+    fulfillJson(route, 201, conversation(conversationId)),
+  );
+  await page.route(
+    `**/api/v1/chat/conversations/${conversationId}`,
+    async (route) => {
+      conversationReads += 1;
+      await fulfillJson(route, 200, conversation(conversationId));
+    },
+  );
+  await page.route(
+    "**/api/v1/chat/conversations/*/messages",
+    async (route) => {
+      sentBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      await fulfillJson(route, 409, {
+        code: "CHAT_STATE_CHANGED",
+        message: "El estado de la conversación cambió.",
+      });
+    },
+  );
+
+  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await sendMessage(page, "Quiero información sobre mi consulta");
+
+  const error = widget.getByRole("alert");
+  await expect(error).toContainText("No pudimos procesar el mensaje");
+  await expect(
+    widget.getByText("La conversación cambió. Elige una opción vigente para continuar."),
+  ).toHaveCount(0);
+  await expect(
+    widget.getByText("Quiero información sobre mi consulta", { exact: true }),
+  ).toBeVisible();
+  expect(sentBodies).toEqual([
+    { content: "Quiero información sobre mi consulta" },
+  ]);
+  expect(conversationReads).toBe(0);
   expect(unhandled).toEqual([]);
 });
 
@@ -1148,7 +1197,7 @@ test("si falla el reinicio conserva la conversación y permite reintentarlo", as
 for (const failure of [
   { name: "403", status: 403, expected: "No tienes permisos" },
   { name: "404", status: 404, expected: "No encontramos esta conversación" },
-  { name: "409", status: 409, expected: "La conversación ya cambió" },
+  { name: "409", status: 409, expected: "La solicitud ya está registrada" },
   { name: "429", status: 429, expected: "límite de solicitudes" },
   { name: "red", status: 0, expected: "No pudimos conectar" },
 ]) {

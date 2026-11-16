@@ -10,6 +10,92 @@ async function login(page: Page, email: string) {
   await expect(page).not.toHaveURL(/\/ingresar$/);
 }
 
+async function installApiMocks(page: Page) {
+  let user = {
+    id: "route-smoke-client",
+    full_name: "Cliente de pruebas",
+    email: "cliente@demo.com",
+    role: "CLIENTE",
+    is_active: true,
+  };
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const { pathname } = new URL(request.url());
+
+    if (pathname === "/api/v1/auth/login" && request.method() === "POST") {
+      const body = request.postDataJSON() as { email?: string };
+      const role = body.email?.startsWith("supervisor")
+        ? "SUPERVISOR"
+        : body.email?.startsWith("asesor")
+          ? "ASESOR"
+          : "CLIENTE";
+      user = {
+        id: `route-smoke-${role.toLowerCase()}`,
+        full_name:
+          role === "SUPERVISOR"
+            ? "Supervisor de pruebas"
+            : role === "ASESOR"
+              ? "Asesor de pruebas"
+              : "Cliente de pruebas",
+        email: body.email ?? "cliente@demo.com",
+        role,
+        is_active: true,
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "route-smoke-token", user }),
+      });
+      return;
+    }
+
+    let body: unknown = [];
+    if (pathname === "/api/v1/auth/me") body = user;
+    else if (pathname === "/api/v1/notifications/unread-count") {
+      body = { unread_count: 0 };
+    } else if (pathname === "/api/v1/users/me/profile") {
+      body = {
+        full_name: user.full_name,
+        email: user.email,
+        phone: null,
+        role: user.role,
+        is_active: true,
+      };
+    } else if (pathname === "/api/v1/users/me/preferences") {
+      body = {
+        in_app_notifications: true,
+        email_notifications: true,
+        timezone: "America/Lima",
+      };
+    } else if (pathname === "/api/v1/reports/summary") {
+      body = {
+        total_tickets: 0,
+        new_tickets: 0,
+        assigned_tickets: 0,
+        in_process_tickets: 0,
+        pending_client_tickets: 0,
+        resolved_tickets: 0,
+        closed_tickets: 0,
+        cancelled_tickets: 0,
+        average_resolution_time_hours: 0,
+      };
+    } else if (
+      pathname.startsWith("/api/v1/tickets") ||
+      pathname.startsWith("/api/v1/audit") ||
+      pathname.startsWith("/api/v1/notifications")
+    ) {
+      body = { items: [], total: 0, page: 1, page_size: 20, total_pages: 0 };
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
 async function verifyRoutes(page: Page, paths: readonly string[]) {
   const failedApi: string[] = [];
   page.on("response", (response) => {
@@ -30,10 +116,11 @@ async function verifyRoutes(page: Page, paths: readonly string[]) {
   expect(failedApi, failedApi.join("\n")).toEqual([]);
 }
 
-test.describe("rutas conectadas al backend", () => {
+test.describe("rutas autenticadas con respuestas mockeadas", () => {
   test.skip(({ browserName }) => browserName !== "chromium");
 
   test("cliente", async ({ page }) => {
+    await installApiMocks(page);
     await login(page, "cliente@demo.com");
     await verifyRoutes(page, [
       "/app/inicio",
@@ -46,6 +133,7 @@ test.describe("rutas conectadas al backend", () => {
   });
 
   test("asesor", async ({ page }) => {
+    await installApiMocks(page);
     await login(page, "asesor@demo.com");
     await verifyRoutes(page, [
       "/asesor/panel",
@@ -56,6 +144,7 @@ test.describe("rutas conectadas al backend", () => {
   });
 
   test("supervisor", async ({ page }) => {
+    await installApiMocks(page);
     await login(page, "supervisor@demo.com");
     await verifyRoutes(page, [
       "/supervisor/operacion",

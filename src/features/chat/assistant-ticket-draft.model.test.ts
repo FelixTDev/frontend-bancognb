@@ -75,7 +75,7 @@ describe("ticket draft model", () => {
 describe("assistant ticket errors", () => {
   it("explains validation, conflict, network and server errors without success wording", () => {
     expect(getAssistantRequestErrorMessage(422, "ticket")).toMatch(/correcci[oó]n/i);
-    expect(getAssistantRequestErrorMessage(409, "ticket")).toMatch(/ya tiene una solicitud/i);
+    expect(getAssistantRequestErrorMessage(409, "ticket")).toMatch(/ya está registrada/i);
     expect(getAssistantRequestErrorMessage(0, "ticket")).toMatch(/conectar/i);
     expect(getAssistantRequestErrorMessage(503, "ticket")).toMatch(/borrador sigue disponible/i);
   });
