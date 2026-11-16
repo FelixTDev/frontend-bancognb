@@ -49,6 +49,7 @@ import {
   getSafeAssistantSourceUrl,
   getAssistantRequestErrorMessage,
   getAssistantClarificationChoices,
+  formatAssistantOptionLabel,
   formatAssistantMessage,
   ticketDraftCorrectionMessage,
   type ReadyTicketDraftPayload,
@@ -217,7 +218,7 @@ function AssistantInteractiveOptions({
             disabled={disabled}
             onClick={() => onSelect(option)}
           >
-            <span>{option.label}</span>
+            <span>{formatAssistantOptionLabel(option.label)}</span>
             <ChevronRight aria-hidden="true" />
           </button>
         ))}
@@ -246,6 +247,7 @@ function AssistantClarificationOptions({
       {choices.map((choice) => {
         const label =
           choice.kind === "structured" ? choice.option.label : choice.label;
+        const displayLabel = formatAssistantOptionLabel(label);
         return (
           <button
             key={
@@ -257,7 +259,7 @@ function AssistantClarificationOptions({
             disabled={disabled}
             onClick={() => onSelect(choice)}
           >
-            <span>{label}</span>
+            <span>{displayLabel}</span>
             <ChevronRight aria-hidden="true" />
           </button>
         );

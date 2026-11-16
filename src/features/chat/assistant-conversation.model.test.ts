@@ -10,7 +10,21 @@ import {
   getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
   getSafeAssistantSourceUrl,
+  formatAssistantOptionLabel,
 } from "./assistant-conversation.model";
+
+describe("assistant option labels", () => {
+  it("formats database category keys as readable Spanish labels", () => {
+    expect(formatAssistantOptionLabel("BANCA_DIGITAL")).toBe("Banca Digital");
+    expect(formatAssistantOptionLabel("CREDITOS")).toBe("Créditos");
+    expect(formatAssistantOptionLabel("CUENTAS")).toBe("Cuentas");
+  });
+
+  it("leaves ordinary option labels unchanged", () => {
+    const label = "¿Qué hago si olvidé mi contraseña?";
+    expect(formatAssistantOptionLabel(label)).toBe(label);
+  });
+});
 
 const structuredChoice = (
   id: string,

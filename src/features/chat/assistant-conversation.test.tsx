@@ -156,4 +156,66 @@ describe("AssistantConversation", () => {
     });
     expect(createConversation).toHaveBeenCalledOnce();
   });
+
+  it("renders FAQ category choices with readable labels and submits their IDs", async () => {
+    const user = userEvent.setup();
+    const conversationId = "conversation-category-test";
+    const sendMessage = vi
+      .spyOn(api.chat, "message")
+      .mockResolvedValueOnce(
+        reply("Claro, elige una categoría.", {
+          resolved: false,
+          requires_clarification: true,
+          suggested_action: "ASK_CLARIFICATION",
+          ui: {
+            type: "FAQ_CATEGORY_CHOICES",
+            menu_id: "faq_categories",
+            options: [
+              {
+                id: "category:banking",
+                label: "BANCA_DIGITAL",
+                action: "SHOW_FAQ_CATEGORY",
+              },
+              {
+                id: "category:credit",
+                label: "CREDITOS",
+                action: "SHOW_FAQ_CATEGORY",
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(reply("Elige una pregunta frecuente."));
+
+    vi.spyOn(api.chat, "create").mockResolvedValue(
+      conversation(conversationId),
+    );
+    renderAssistant();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Escribe tu consulta" }),
+      "que opciones hay{Enter}",
+    );
+
+    const categoryButton = await screen.findByRole("button", {
+      name: "Banca Digital",
+    });
+    expect(
+      screen.getByRole("button", { name: "Créditos" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "BANCA_DIGITAL" }),
+    ).toBeNull();
+
+    await user.click(categoryButton);
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenNthCalledWith(1, conversationId, {
+        content: "que opciones hay",
+      });
+      expect(sendMessage).toHaveBeenNthCalledWith(2, conversationId, {
+        option_id: "category:banking",
+      });
+    });
+  });
 });

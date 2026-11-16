@@ -108,6 +108,22 @@ const assistantCategoryLabels: Record<string, string> = {
   RECLAMOS_SIMPLES: "reclamos",
 };
 
+const assistantOptionCategoryLabels: Record<string, string> = {
+  TARJETAS: "Tarjetas",
+  CUENTAS: "Cuentas",
+  BANCA_DIGITAL: "Banca Digital",
+  CREDITOS: "Créditos",
+  RECLAMOS_SIMPLES: "Reclamos simples",
+};
+
+/** Presents category keys as title-cased labels in interactive choices. */
+export function formatAssistantOptionLabel(label: string): string {
+  return (
+    assistantOptionCategoryLabels[label.trim().toLocaleUpperCase("es-PE")] ??
+    label
+  );
+}
+
 const assistantCategoryTokenPattern =
   /\b(?:TARJETAS|CUENTAS|BANCA_DIGITAL|CREDITOS|RECLAMOS_SIMPLES)(?:\s*,\s*(?:TARJETAS|CUENTAS|BANCA_DIGITAL|CREDITOS|RECLAMOS_SIMPLES))*\b/giu;
 
