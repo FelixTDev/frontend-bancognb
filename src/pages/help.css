@@ -2,14 +2,14 @@
   padding-bottom: clamp(3.5rem, 7vw, 6rem);
 }
 
-.public-shell--help .assistant-widget__launcher {
+.assistant-widget--compact .assistant-widget__launcher {
   width: 58px;
   min-height: 58px;
   padding: 0;
   justify-content: center;
 }
 
-.public-shell--help .assistant-widget__launcher span {
+.assistant-widget--compact .assistant-widget__launcher span {
   display: none;
 }
 

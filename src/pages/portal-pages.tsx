@@ -58,6 +58,7 @@ import {
   StatePanel,
   StatusBadge,
 } from "../shared/components/ui";
+import emptyAssistantIllustration from "../assets/images/web/assistant-empty-state.webp";
 import { ticketPriorityLabels } from "../shared/ticket-labels";
 import { FaqLibrary } from "../shared/components/faq-library";
 import { FaqPageHero } from "../shared/components/faq-page-hero";
@@ -192,25 +193,27 @@ export function ClientDashboardPage() {
           <EmptyTickets />
         )}
       </section>
-      <section className="dashboard-help">
-        <ResponsiveImage
-          name="guided-empty-state"
-          alt="Escultura circular clara con un marcador azul al inicio del recorrido"
-        />
-        <div>
-          <h2>¿No sabes por dónde empezar?</h2>
-          <p>
-            Consulta respuestas frecuentes o conversa con el asistente antes de
-            registrar una solicitud.
-          </p>
+      {ticketQuery.isLoading || ticketQuery.isError || tickets.length ? (
+        <section className="dashboard-help">
+          <ResponsiveImage
+            name="guided-empty-state"
+            alt="Ilustración de un asistente digital amigable con burbujas de conversación."
+          />
           <div>
-            <ButtonLink to="/app/faq" variant="secondary">
-              Ver preguntas
-            </ButtonLink>
-            <ButtonLink to="/app/asistente">Abrir asistente</ButtonLink>
+            <h2>¿No sabes por dónde empezar?</h2>
+            <p>
+              Consulta respuestas frecuentes o conversa con el asistente antes de
+              registrar una solicitud.
+            </p>
+            <div>
+              <ButtonLink to="/app/faq" variant="secondary">
+                Ver preguntas
+              </ButtonLink>
+              <ButtonLink to="/app/asistente">Abrir asistente</ButtonLink>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
     </>
   );
 }
@@ -1670,17 +1673,26 @@ function TicketList({
 function EmptyTickets() {
   return (
     <div className="empty-illustrated">
-      <ResponsiveImage
-        name="guided-empty-state"
-        alt="Escultura circular clara con un marcador azul al inicio del recorrido"
+      <img
+        src={emptyAssistantIllustration}
+        alt=""
+        width={800}
+        height={600}
+        loading="lazy"
+        decoding="async"
       />
-      <div>
+      <div className="empty-illustrated__copy">
         <h2>Aún no tienes solicitudes</h2>
         <p>
-          Cuando necesites orientación, crea una solicitud y sigue cada
-          actualización desde aquí.
+          Empieza cuando quieras: crea una solicitud o abre el asistente para
+          recibir orientación.
         </p>
-        <ButtonLink to="/app/nueva-solicitud">Crear solicitud</ButtonLink>
+        <div className="empty-illustrated__actions">
+          <ButtonLink to="/app/nueva-solicitud">Crear solicitud</ButtonLink>
+          <ButtonLink to="/app/asistente" variant="secondary">
+            Abrir asistente
+          </ButtonLink>
+        </div>
       </div>
     </div>
   );

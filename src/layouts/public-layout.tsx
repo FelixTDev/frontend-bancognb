@@ -1,7 +1,9 @@
 import { Menu, X } from "lucide-react";
-import { useState } from "react";
-import { PublicAssistantWidget } from "../features/chat/public-assistant-widget";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useAuth } from "../features/auth/auth-context";
+import { publicActionForRole } from "../features/auth/roles";
+import { AccountMenu } from "../shared/components/account-menu";
 import { AcademicDisclaimer } from "../shared/components/academic-disclaimer";
 import { BrandMark } from "../shared/components/brand-mark";
 import { ButtonLink } from "../shared/components/ui";
@@ -15,10 +17,37 @@ const links = [
 ];
 
 export function PublicLayout() {
-  const [isOpen, setIsOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const isOpen = openPath === location.pathname;
+  const { session } = useAuth();
   const isHowProcess = location.pathname === "/como-funciona";
   const isHelpPage = location.pathname === "/ayuda";
+  const roleAction = session
+    ? publicActionForRole(session.user.role)
+    : null;
+
+  const closeNavigation = () => setOpenPath(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpenPath(null);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleHistoryNavigation = () => setOpenPath(null);
+    window.addEventListener("popstate", handleHistoryNavigation);
+    return () => window.removeEventListener("popstate", handleHistoryNavigation);
+  }, []);
+
   return (
     <div
       className={`public-shell${isHowProcess ? " public-shell--how-process" : ""}${isHelpPage ? " public-shell--help" : ""}`}
@@ -30,15 +59,18 @@ export function PublicLayout() {
         <div className="public-header__inner">
           <BrandMark />
           <button
+            ref={menuButtonRef}
             className="menu-toggle"
             type="button"
             aria-label={isOpen ? "Cerrar navegación" : "Abrir navegación"}
+            aria-controls="public-navigation"
             aria-expanded={isOpen}
-            onClick={() => setIsOpen((current) => !current)}
+            onClick={() => setOpenPath(isOpen ? null : location.pathname)}
           >
             {isOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
           </button>
           <nav
+            id="public-navigation"
             className={`public-nav${isOpen ? " public-nav--open" : ""}`}
             aria-label="Navegación principal"
           >
@@ -47,22 +79,41 @@ export function PublicLayout() {
                 key={link.to}
                 to={link.to}
                 end={link.end}
-                onClick={() => setIsOpen(false)}
+                onClick={closeNavigation}
               >
                 {link.label}
               </NavLink>
             ))}
-            <NavLink
-              className="public-nav__login"
-              to="/ingresar"
-              onClick={() => setIsOpen(false)}
-            >
-              Ingresar
-            </NavLink>
-            <ButtonLink to="/registro" onClick={() => setIsOpen(false)}>
-              Crear solicitud
-            </ButtonLink>
+            {roleAction ? (
+              <ButtonLink
+                className="public-nav__action"
+                to={roleAction.to}
+                onClick={closeNavigation}
+              >
+                {roleAction.label}
+              </ButtonLink>
+            ) : (
+              <>
+                <NavLink
+                  className="public-nav__login"
+                  to="/ingresar"
+                  onClick={closeNavigation}
+                >
+                  Ingresar
+                </NavLink>
+                <ButtonLink to="/registro" onClick={closeNavigation}>
+                  Crear solicitud
+                </ButtonLink>
+              </>
+            )}
           </nav>
+          {session ? (
+            <AccountMenu
+              variant="public"
+              closeOnExternal={isOpen}
+              onOpen={closeNavigation}
+            />
+          ) : null}
         </div>
       </header>
       <AcademicDisclaimer />
@@ -70,7 +121,6 @@ export function PublicLayout() {
         <Outlet />
       </main>
       <Footer />
-      <PublicAssistantWidget />
     </div>
   );
 }

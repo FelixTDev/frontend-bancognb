@@ -1,10 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { getSafeFaqContent } from "./faq-content";
+import {
+  isExcludedFaq,
+  getSafeFaqContent,
+  isExcludedFaqQuestion,
+} from "./faq-content";
 
 const safeAnswer =
   "No tengo información verificada para responder esta consulta financiera.";
 
 describe("safe FAQ content", () => {
+  it("excludes the mobile banking affiliation question with normalized punctuation", () => {
+    expect(isExcludedFaqQuestion("Como me afilio a banca movil")).toBe(true);
+    expect(isExcludedFaqQuestion("¿CÓMO me afilio a Banca Móvil? ")).toBe(true);
+    expect(isExcludedFaqQuestion("¿Cómo consulto el saldo de mi cuenta?")).toBe(
+      false,
+    );
+    expect(isExcludedFaqQuestion("Banca digital")).toBe(false);
+    expect(
+      isExcludedFaq({
+        title: "¿Cómo me afilio a Banca Móvil?",
+        question: "¿Cómo uso el acceso móvil?",
+      }),
+    ).toBe(true);
+  });
+
   it("generalizes a legacy question that names an institution", () => {
     expect(
       getSafeFaqContent({

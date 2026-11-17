@@ -23,6 +23,7 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../shared/api/endpoints";
+import { isExcludedFaq } from "../shared/faq-content";
 import { ApiError } from "../shared/api/http";
 import { formatCategoryDisplayName } from "../shared/ticket-labels";
 import {
@@ -177,7 +178,7 @@ export function KnowledgePage() {
     queryKey: ["faqs", "staff", search],
     queryFn: () => api.faqs.list({ page: 1, page_size: 50, search }),
   });
-  const faqs = faqsFromUnknown(query.data);
+  const faqs = faqsFromUnknown(query.data).filter((faq) => !isExcludedFaq(faq));
   return (
     <>
       <PageIntro
@@ -615,7 +616,7 @@ function FaqAdmin({ onEdit }: { readonly onEdit: (item: Faq) => void }) {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["faqs", "admin"] }),
   });
-  const faqs = faqsFromUnknown(query.data);
+  const faqs = faqsFromUnknown(query.data).filter((faq) => !isExcludedFaq(faq));
   if (query.isLoading) return <Skeleton rows={8} />;
   return faqs.length ? (
     <div className="admin-table content-admin-table content-admin-table--faqs">

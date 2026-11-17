@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/endpoints";
-import { getSafeFaqContent } from "../faq-content";
+import { getSafeFaqContent, isExcludedFaq } from "../faq-content";
 import type { Category, Faq, PageResult } from "../types/domain";
 import { PaginationControls, Skeleton, StatePanel } from "./ui";
 
@@ -31,7 +31,7 @@ const pageCount = (
   total: number,
 ) =>
   data && "items" in data
-    ? (data.total_pages ?? data.pages ?? Math.ceil(total / data.page_size))
+    ? Math.ceil(total / Math.max(data.page_size, 1))
     : 1;
 
 const knownCategoryLabels: Readonly<Record<string, string>> = {
@@ -72,8 +72,12 @@ export function FaqLibrary({
     queryKey: ["categories"],
     queryFn: api.categories.list,
   });
-  const faqs = pageItems(query.data);
-  const total = pageTotal(query.data, faqs);
+  const responseFaqs = pageItems(query.data);
+  const faqs = responseFaqs.filter((faq) => !isExcludedFaq(faq));
+  const total = Math.max(
+    0,
+    pageTotal(query.data, responseFaqs) + faqs.length - responseFaqs.length,
+  );
   const pages = pageCount(query.data, total);
   const categories =
     categoriesQuery.data?.filter((category) => category.is_active) ?? [];

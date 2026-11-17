@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { lazy, type ComponentType } from "react";
 import { AppShell } from "../layouts/app-shell";
 import { PublicLayout } from "../layouts/public-layout";
+import { SiteLayout } from "../layouts/site-layout";
 import {
   NoAccessPage,
   NotFoundPage,
@@ -67,95 +68,110 @@ const AuditPage = page(staffPages, "AuditPage");
 
 export const router = createBrowserRouter([
   {
-    element: <PublicLayout />,
+    element: <SiteLayout />,
     errorElement: <RouteErrorPage />,
     children: [
-      { index: true, element: <HomePage /> },
-      { path: "como-funciona", element: <HowItWorksPage /> },
-      { path: "preguntas-frecuentes", element: <PublicFaqPage /> },
-      { path: "sobre-el-proyecto", element: <AboutPage /> },
       {
-        path: "nosotros",
-        element: <Navigate to="/sobre-el-proyecto" replace />,
-      },
-      { path: "ayuda", element: <HelpPage /> },
-      { path: "privacidad", element: <LegalPage type="privacy" /> },
-      { path: "terminos", element: <LegalPage type="terms" /> },
-    ],
-  },
-  { path: "restablecer-acceso", element: <ResetPasswordPage /> },
-  { path: "verificar-cuenta", element: <VerifyAccountPage /> },
-  {
-    element: <GuestRoute />,
-    children: [
-      { path: "ingresar", element: <LoginPage /> },
-      { path: "registro", element: <RegisterPage /> },
-      { path: "recuperar-acceso", element: <ForgotPasswordPage /> },
-    ],
-  },
-  { path: "sin-acceso", element: <NoAccessPage /> },
-  {
-    element: <ProtectedRoute roles={["CLIENTE"]} />,
-    children: [
-      {
-        path: "app",
-        element: <AppShell />,
+        element: <PublicLayout />,
         children: [
-          { path: "inicio", element: <ClientDashboardPage /> },
-          { path: "solicitudes", element: <ClientTicketsPage /> },
-          { path: "nueva-solicitud", element: <NewTicketPage /> },
-          { path: "solicitudes/:id/creada", element: <TicketCreatedPage /> },
-          { path: "solicitudes/:id", element: <TicketDetailPage /> },
-          { path: "faq", element: <ClientFaqPage /> },
-          { path: "asistente", element: <ChatbotPage /> },
-          { path: "perfil", element: <ProfilePage /> },
-        ],
-      },
-    ],
-  },
-  {
-    element: <ProtectedRoute roles={["ASESOR"]} />,
-    children: [
-      {
-        path: "asesor",
-        element: <AppShell />,
-        children: [
-          { path: "panel", element: <AdvisorDashboardPage /> },
-          { path: "bandeja", element: <AdvisorInboxPage /> },
-          { path: "historial", element: <AdvisorHistoryPage /> },
-          { path: "conocimiento", element: <KnowledgePage /> },
+          { index: true, element: <HomePage /> },
+          { path: "como-funciona", element: <HowItWorksPage /> },
+          { path: "preguntas-frecuentes", element: <PublicFaqPage /> },
+          { path: "sobre-el-proyecto", element: <AboutPage /> },
           {
-            path: "tickets/:id",
-            element: <StaffTicketDetailPage fallbackPath="/asesor/panel" />,
+            path: "nosotros",
+            element: <Navigate to="/sobre-el-proyecto" replace />,
           },
-          { path: "perfil", element: <ProfilePage /> },
+          { path: "ayuda", element: <HelpPage /> },
+          { path: "privacidad", element: <LegalPage type="privacy" /> },
+          { path: "terminos", element: <LegalPage type="terms" /> },
         ],
       },
-    ],
-  },
-  {
-    element: <ProtectedRoute roles={["SUPERVISOR"]} />,
-    children: [
       {
-        path: "supervisor",
-        element: <AppShell />,
+        path: "restablecer-acceso",
+        element: <ResetPasswordPage />,
+      },
+      { path: "verificar-cuenta", element: <VerifyAccountPage /> },
+      {
+        element: <GuestRoute />,
         children: [
-          { path: "operacion", element: <SupervisorDashboardPage /> },
-          { path: "cola", element: <SupervisorQueuePage /> },
-          { path: "historial", element: <SupervisorHistoryPage /> },
-          { path: "asignaciones", element: <AssignmentsPage /> },
-          { path: "contenido", element: <ContentManagementPage /> },
-          { path: "sla", element: <SlaPage /> },
-          { path: "reportes", element: <ReportsPage /> },
-          { path: "auditoria", element: <AuditPage /> },
-          {
-            path: "tickets/:id",
-            element: <StaffTicketDetailPage fallbackPath="/supervisor/cola" />,
-          },
-          { path: "perfil", element: <ProfilePage /> },
+          { path: "ingresar", element: <LoginPage /> },
+          { path: "registro", element: <RegisterPage /> },
+          { path: "recuperar-acceso", element: <ForgotPasswordPage /> },
         ],
       },
+      { path: "sin-acceso", element: <NoAccessPage /> },
+      {
+        element: <ProtectedRoute roles={["CLIENTE"]} />,
+        children: [
+          {
+            path: "app",
+            element: <AppShell />,
+            children: [
+              { path: "inicio", element: <ClientDashboardPage /> },
+              { path: "solicitudes", element: <ClientTicketsPage /> },
+              { path: "nueva-solicitud", element: <NewTicketPage /> },
+              {
+                path: "solicitudes/:id/creada",
+                element: <TicketCreatedPage />,
+              },
+              { path: "solicitudes/:id", element: <TicketDetailPage /> },
+              { path: "faq", element: <ClientFaqPage /> },
+              { path: "asistente", element: <ChatbotPage /> },
+              { path: "perfil", element: <ProfilePage /> },
+            ],
+          },
+        ],
+      },
+      {
+        element: <ProtectedRoute roles={["ASESOR"]} />,
+        children: [
+          {
+            path: "asesor",
+            element: <AppShell />,
+            children: [
+              { path: "panel", element: <AdvisorDashboardPage /> },
+              { path: "bandeja", element: <AdvisorInboxPage /> },
+              { path: "historial", element: <AdvisorHistoryPage /> },
+              { path: "conocimiento", element: <KnowledgePage /> },
+              {
+                path: "tickets/:id",
+                element: (
+                  <StaffTicketDetailPage fallbackPath="/asesor/panel" />
+                ),
+              },
+              { path: "perfil", element: <ProfilePage /> },
+            ],
+          },
+        ],
+      },
+      {
+        element: <ProtectedRoute roles={["SUPERVISOR"]} />,
+        children: [
+          {
+            path: "supervisor",
+            element: <AppShell />,
+            children: [
+              { path: "operacion", element: <SupervisorDashboardPage /> },
+              { path: "cola", element: <SupervisorQueuePage /> },
+              { path: "historial", element: <SupervisorHistoryPage /> },
+              { path: "asignaciones", element: <AssignmentsPage /> },
+              { path: "contenido", element: <ContentManagementPage /> },
+              { path: "sla", element: <SlaPage /> },
+              { path: "reportes", element: <ReportsPage /> },
+              { path: "auditoria", element: <AuditPage /> },
+              {
+                path: "tickets/:id",
+                element: (
+                  <StaffTicketDetailPage fallbackPath="/supervisor/cola" />
+                ),
+              },
+              { path: "perfil", element: <ProfilePage /> },
+            ],
+          },
+        ],
+      },
+      { path: "*", element: <NotFoundPage /> },
     ],
   },
-  { path: "*", element: <NotFoundPage /> },
 ]);

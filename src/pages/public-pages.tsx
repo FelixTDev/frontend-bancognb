@@ -23,7 +23,10 @@ import "./help.css";
 import "./how-it-works.css";
 import { requestOpenPublicAssistant } from "../features/chat/public-assistant-widget";
 import { api } from "../shared/api/endpoints";
-import { getSafeFaqContent } from "../shared/faq-content";
+import {
+  getSafeFaqContent,
+  isExcludedFaq,
+} from "../shared/faq-content";
 import {
   Button,
   ButtonLink,
@@ -45,7 +48,9 @@ export function HomePage() {
     queryKey: ["faqs", "home"],
     queryFn: () => api.faqs.list({ page: 1, page_size: 4 }),
   });
-  const faqs = asFaqs(faqQuery.data).slice(0, 4);
+  const faqs = asFaqs(faqQuery.data)
+    .filter((faq) => !isExcludedFaq(faq))
+    .slice(0, 4);
   return (
     <>
       <section className="hero">

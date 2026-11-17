@@ -219,6 +219,58 @@ describe("AssistantConversation", () => {
     });
   });
 
+  it("hides the excluded FAQ from API-provided question choices", async () => {
+    const user = userEvent.setup();
+    const conversationId = "conversation-faq-exclusion-test";
+    const sendMessage = vi
+      .spyOn(api.chat, "message")
+      .mockResolvedValueOnce(
+        reply("Elige una pregunta frecuente.", {
+          resolved: false,
+          requires_clarification: true,
+          suggested_action: "ASK_CLARIFICATION",
+          ui: {
+            type: "FAQ_CHOICES",
+            menu_id: "faq:banking",
+            options: [
+              {
+                id: "faq:mobile-affiliation",
+                label: "¿Cómo me afilio a Banca Móvil?",
+                action: "SELECT_FAQ",
+              },
+              {
+                id: "faq:balance",
+                label: "¿Cómo consulto el saldo de mi cuenta?",
+                action: "SELECT_FAQ",
+              },
+            ],
+          },
+        }),
+      );
+
+    vi.spyOn(api.chat, "create").mockResolvedValue(
+      conversation(conversationId),
+    );
+    renderAssistant();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Escribe tu consulta" }),
+      "banca digital{Enter}",
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: "¿Cómo consulto el saldo de mi cuenta?",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "¿Cómo me afilio a Banca Móvil?",
+      }),
+    ).toBeNull();
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
   it("renders the backend priority quick replies and submits their content unchanged", async () => {
     const user = userEvent.setup();
     const conversationId = "conversation-priority-test";

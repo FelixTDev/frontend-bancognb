@@ -3,16 +3,13 @@ import {
   BookOpen,
   Bot,
   ChartNoAxesCombined,
-  ChevronDown,
   ClipboardList,
   FileArchive,
   FileClock,
   Gauge,
   HelpCircle,
   Home,
-  LogOut,
   Menu,
-  Settings,
   ShieldCheck,
   TicketCheck,
   Users,
@@ -22,7 +19,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/auth-context";
+import { labelForRole } from "../features/auth/roles";
 import { api } from "../shared/api/endpoints";
+import { AccountMenu } from "../shared/components/account-menu";
 import { AcademicDisclaimer } from "../shared/components/academic-disclaimer";
 import { BrandMark } from "../shared/components/brand-mark";
 import type { UserRole } from "../shared/types/domain";
@@ -65,15 +64,15 @@ const navByRole: Record<UserRole, readonly NavItem[]> = {
 
 export function AppShell() {
   const location = useLocation();
-  const { session, logout } = useAuth();
+  const { session } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
-  const [isProfileOpen, setProfileOpen] = useState(false);
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const role = session?.user.role ?? "CLIENTE";
+  const roleLabel = labelForRole(role);
   const nav = navByRole[role];
   const unread = useQuery({
     queryKey: ["notifications", "unread-count"],
@@ -98,11 +97,6 @@ export function AppShell() {
       ]);
     },
   });
-
-  const handleLogout = async () => {
-    await logout();
-    void navigate("/ingresar", { replace: true, state: { reason: "logout" } });
-  };
 
   useEffect(() => {
     if (!isSidebarOpen) return;
@@ -191,13 +185,7 @@ export function AppShell() {
             <Menu aria-hidden="true" />
           </button>
           <div className="app-header__context">
-            <span>
-              {role === "CLIENTE"
-                ? "Portal de cliente"
-                : role === "ASESOR"
-                  ? "Atención operativa"
-                  : "Supervisión operativa"}
-            </span>
+            <span>{roleLabel}</span>
             <strong>{session?.user.full_name}</strong>
           </div>
           <div className="app-header__actions">
@@ -246,42 +234,12 @@ export function AppShell() {
                 </div>
               ) : null}
             </div>
-            <div className="popover-anchor">
-              <button
-                className="profile-button"
-                aria-expanded={isProfileOpen}
-                onClick={() => setProfileOpen((current) => !current)}
-              >
-                <span>
-                  {session?.user.full_name
-                    .split(" ")
-                    .map((part) => part[0])
-                    .slice(0, 2)
-                    .join("")}
-                </span>
-                <ChevronDown aria-hidden="true" />
-              </button>
-              {isProfileOpen ? (
-                <div className="popover profile-menu">
-                  <NavLink
-                    to={
-                      role === "CLIENTE"
-                        ? "/app/perfil"
-                        : role === "ASESOR"
-                          ? "/asesor/perfil"
-                          : "/supervisor/perfil"
-                    }
-                  >
-                    <Settings aria-hidden="true" />
-                    Perfil y preferencias
-                  </NavLink>
-                  <button onClick={() => void handleLogout()}>
-                    <LogOut aria-hidden="true" />
-                    Cerrar sesión
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            <AccountMenu
+              variant="portal"
+              onLogoutComplete={() =>
+                void navigate("/", { replace: true, state: { reason: "logout" } })
+              }
+            />
           </div>
         </header>
         {location.pathname === "/app/asistente" ? null : <AcademicDisclaimer />}

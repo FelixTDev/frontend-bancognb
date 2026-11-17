@@ -37,6 +37,7 @@ import {
 import { ApiError } from "../../shared/api/http";
 import { AcademicDisclaimer } from "../../shared/components/academic-disclaimer";
 import { Button, ResponsiveImage } from "../../shared/components/ui";
+import { isExcludedFaqQuestion } from "../../shared/faq-content";
 import { formatCategoryDisplayName } from "../../shared/ticket-labels";
 import {
   type AssistantResponseStatus,
@@ -202,7 +203,10 @@ function AssistantInteractiveOptions({
   readonly disabled: boolean;
   readonly onSelect: (option: ChatbotUIOption) => void;
 }) {
-  const options = ui?.options ?? [];
+  const options = (ui?.options ?? []).filter(
+    (option) =>
+      ui?.type !== "FAQ_CHOICES" || !isExcludedFaqQuestion(option.label),
+  );
   if (!ui || options.length === 0) return null;
 
   const heading = interactiveOptionHeadings[ui.type];
@@ -238,7 +242,16 @@ function AssistantClarificationOptions({
   readonly disabled: boolean;
   readonly onSelect: (choice: AssistantClarificationChoice) => void;
 }) {
-  if (!choices.length) return null;
+  const visibleChoices = choices.filter((choice) => {
+    const label =
+      choice.kind === "structured"
+        ? choice.option.label
+        : choice.kind === "quick-reply"
+          ? choice.quickReply.label
+          : choice.label;
+    return !isExcludedFaqQuestion(label);
+  });
+  if (!visibleChoices.length) return null;
 
   return (
     <div
@@ -246,7 +259,7 @@ function AssistantClarificationOptions({
       role="group"
       aria-label="Opciones de aclaración"
     >
-      {choices.map((choice) => {
+      {visibleChoices.map((choice) => {
         const label =
           choice.kind === "structured"
             ? choice.option.label

@@ -27,6 +27,27 @@ function normalizeFaqQuestion(value: string): string {
     .toLocaleLowerCase("es-PE");
 }
 
+const excludedFaqQuestion = normalizeFaqQuestion(
+  "¿Cómo me afilio a Banca Móvil?",
+).replace(/[¿?¡!.,;:]+/gu, "");
+
+export function isExcludedFaq(faq: {
+  readonly question: string;
+  readonly title?: string;
+}): boolean {
+  return (
+    isExcludedFaqQuestion(faq.question) ||
+    isExcludedFaqQuestion(faq.title ?? "")
+  );
+}
+
+export function isExcludedFaqQuestion(value: string): boolean {
+  return (
+    normalizeFaqQuestion(value).replace(/[¿?¡!.,;:]+/gu, "") ===
+    excludedFaqQuestion
+  );
+}
+
 const legacyQuestionTitles = new Map<string, string>([
   [
     normalizeFaqQuestion("¿Qué tipos de cuentas ofrece Banco GNB?"),

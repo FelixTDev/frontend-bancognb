@@ -17,6 +17,21 @@ async function openAppNavigation(page: Page, projectName: string) {
   await expect(page.getByRole("button", { name: "Cerrar menú" })).toBeFocused();
 }
 
+async function openPublicNavigation(page: Page) {
+  const toggle = page.locator(".menu-toggle");
+  await expect(toggle).toHaveCount(1);
+  if (
+    (await toggle.isVisible()) &&
+    (await toggle.getAttribute("aria-expanded")) !== "true"
+  ) {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  }
+  if (await toggle.isVisible()) {
+    await expect(page.locator(".public-nav")).toHaveClass(/public-nav--open/);
+  }
+}
+
 test("la portada presenta el servicio y navega por contenido público", async ({
   page,
 }) => {
@@ -98,8 +113,20 @@ test("la FAQ conserva sus categorías publicadas", async ({ page }) => {
             version: 1,
             source_url: "https://www.bancognb.com.pe/cuentas",
           },
+          {
+            id: "faq-mobile-affiliation",
+            category_id: "category-3",
+            title: "¿Cómo me afilio a Banca Móvil?",
+            question: "¿Cómo me afilio a Banca Móvil?",
+            answer: "Consulta la información de afiliación disponible.",
+            summary: "Afiliación a banca móvil",
+            tags: ["banca móvil"],
+            status: "PUBLISHED",
+            is_active: true,
+            version: 1,
+          },
         ],
-        total: 19,
+        total: 20,
         page: 1,
         page_size: 100,
         total_pages: 1,
@@ -121,6 +148,10 @@ test("la FAQ conserva sus categorías publicadas", async ({ page }) => {
     await expect(categoryGroup.getByRole("button", { name: label })).toBeVisible();
   }
   await expect(page.getByText("19 preguntas")).toBeVisible();
+  await expect(
+    page.getByText("¿Cómo me afilio a Banca Móvil?", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".faq-list details")).toHaveCount(1);
   const legacyFaq = page
     .locator(".faq-list details")
     .filter({ hasText: "¿Qué tipos de cuentas ofrece una entidad financiera?" });
@@ -138,7 +169,7 @@ test("la FAQ conserva sus categorías publicadas", async ({ page }) => {
   await expect(page.locator('a[href*="bancognb.com.pe"]')).toHaveCount(0);
 });
 
-test("el widget anónimo existe solo en Landing y restaura el foco con Escape", async ({
+test("el widget conserva foco en público y se oculta en el portal autenticado", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -183,17 +214,141 @@ test("el widget anónimo existe solo en Landing y restaura el foco con Escape", 
   await expect(widget).toBeHidden();
   await expect(launcher).toBeFocused();
 
-  await page.locator(".closing-cta").scrollIntoViewIfNeeded();
-  await expect(page.locator(".assistant-widget")).toHaveClass(/obstructed/);
-
   await page.goto("/ingresar");
-  await expect(
-    page.getByRole("button", { name: "Abrir asistente de atención" }),
-  ).toHaveCount(0);
+  await expect(launcher).toBeVisible();
   await page.goto("/registro");
+  await expect(launcher).toBeVisible();
+
+  await login(page, "cliente@demo.com");
+  await expect(page).toHaveURL(/\/app\/inicio$/);
+  await expect(page.locator(".assistant-widget")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Abrir asistente de atención" }),
+    page.locator(".assistant-widget__launcher"),
   ).toHaveCount(0);
+  const assistantLink = page.locator('.sidebar nav a[href="/app/asistente"]');
+  await expect(assistantLink).toHaveCount(1);
+  const appMenuButton = page.getByRole("button", { name: "Abrir menú" });
+  if (await appMenuButton.isVisible()) {
+    await appMenuButton.click();
+    await expect(assistantLink).toBeVisible();
+  }
+  await assistantLink.click();
+  await expect(page).toHaveURL(/\/app\/asistente$/);
+  await expect(page.locator(".assistant-widget")).toHaveCount(0);
+  await expect(page.locator(".assistant-panel--page")).toHaveCount(1);
+});
+
+test("la cabecera pública cambia por rol y vuelve a visitante al cerrar sesión", async ({
+  page,
+}) => {
+  await page.goto("/");
+  let publicNavigation = page.getByRole("navigation", {
+    name: "Navegación principal",
+  });
+  await openPublicNavigation(page);
+  await expect(publicNavigation.getByRole("link", { name: "Ingresar" })).toBeVisible();
+  await expect(
+    publicNavigation.getByRole("link", { name: "Crear solicitud" }),
+  ).toBeVisible();
+  await expect(page.locator(".account-menu")).toHaveCount(0);
+
+  await login(page, "cliente@demo.com");
+  await page.goto("/");
+  publicNavigation = page.getByRole("navigation", {
+    name: "Navegación principal",
+  });
+  await openPublicNavigation(page);
+  await expect(publicNavigation.getByRole("link", { name: "Ingresar" })).toHaveCount(0);
+  await expect(
+    publicNavigation.getByRole("link", { name: "Nueva solicitud" }),
+  ).toBeVisible();
+  const clientTrigger = page.getByRole("button", {
+    name: "Cuenta de Cliente E2E, Cliente",
+  });
+  await clientTrigger.click();
+  const clientMenu = page.getByRole("navigation", {
+    name: "Opciones de cuenta de Cliente",
+  });
+  await expect(clientTrigger).toHaveAttribute("aria-expanded", "true");
+  await expect(clientMenu.getByRole("link", { name: "Mis solicitudes" })).toBeVisible();
+  await expect(clientMenu.getByRole("link", { name: "Perfil" })).toBeVisible();
+  await expect(clientMenu.getByRole("link", { name: "Panel" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(clientMenu).toBeHidden();
+  await expect(clientTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(clientTrigger).toBeFocused();
+  await clientTrigger.click();
+  await clientMenu.getByRole("button", { name: "Cerrar sesión" }).click();
+  await expect(page.locator(".account-menu")).toHaveCount(0);
+  await openPublicNavigation(page);
+  await expect(publicNavigation.getByRole("link", { name: "Ingresar" })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Cliente E2E");
+
+  const roleCases = [
+    {
+      email: "asesor@demo.com",
+      name: "Asesor E2E",
+      role: "Asesor",
+      action: "Ir a atención",
+      links: ["Panel", "Bandeja", "Perfil"],
+      excluded: ["Mis solicitudes", "Cola", "Reportes"],
+      path: "/asesor/panel",
+    },
+    {
+      email: "supervisor@demo.com",
+      name: "Supervisor E2E",
+      role: "Supervisor",
+      action: "Ir a supervisión",
+      links: ["Panel", "Cola", "Reportes", "Perfil"],
+      excluded: ["Mis solicitudes", "Bandeja"],
+      path: "/supervisor/operacion",
+    },
+  ] as const;
+
+  for (const roleCase of roleCases) {
+    await login(page, roleCase.email);
+    await expect(page).toHaveURL(new RegExp(`${roleCase.path.replaceAll("/", "\\/")}$`));
+    await expect(page.locator(".assistant-widget")).toHaveCount(0);
+    const appHeader = page.locator(".app-header");
+    await expect(appHeader.locator(".app-header__context span")).toHaveText(
+      roleCase.role,
+    );
+    await expect(appHeader.locator(".app-header__context strong")).toHaveText(
+      roleCase.name,
+    );
+    await page.goto("/");
+    publicNavigation = page.getByRole("navigation", {
+      name: "Navegación principal",
+    });
+    await openPublicNavigation(page);
+    await expect(
+      publicNavigation.getByRole("link", { name: "Ingresar" }),
+    ).toHaveCount(0);
+    await expect(
+      publicNavigation.getByRole("link", { name: roleCase.action }),
+    ).toBeVisible();
+    const roleTrigger = page.getByRole("button", {
+      name: `Cuenta de ${roleCase.name}, ${roleCase.role}`,
+    });
+    await roleTrigger.click();
+    const roleMenu = page.getByRole("navigation", {
+      name: `Opciones de cuenta de ${roleCase.role}`,
+    });
+    for (const label of roleCase.links) {
+      await expect(roleMenu.getByRole("link", { name: label })).toBeVisible();
+    }
+    for (const label of roleCase.excluded) {
+      await expect(roleMenu.getByRole("link", { name: label })).toHaveCount(0);
+    }
+    await expect(roleTrigger).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(roleMenu).toBeHidden();
+    await expect(roleTrigger).toHaveAttribute("aria-expanded", "false");
+    await expect(roleTrigger).toBeFocused();
+    await roleTrigger.click();
+    await roleMenu.getByRole("button", { name: "Cerrar sesión" }).click();
+    await expect(page.locator(".account-menu")).toHaveCount(0);
+  }
 });
 
 test("el asistente respeta saludo, consulta, aclaración y acciones habilitadas por la API", async ({
@@ -925,7 +1080,9 @@ test("la navegación móvil se abre y no desborda horizontalmente", async ({
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "comprobación móvil");
   await page.goto("/");
-  await page.getByRole("button", { name: "Abrir navegación" }).click();
+  const navigationToggle = page.locator(".menu-toggle");
+  await navigationToggle.click();
+  await expect(navigationToggle).toHaveAttribute("aria-expanded", "true");
   await expect(
     page.getByRole("navigation", { name: "Navegación principal" }),
   ).toBeVisible();
@@ -934,4 +1091,7 @@ test("la navegación móvil se abre y no desborda horizontalmente", async ({
     content: document.documentElement.scrollWidth,
   }));
   expect(fit.content).toBeLessThanOrEqual(fit.viewport + 1);
+  await page.keyboard.press("Escape");
+  await expect(navigationToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(navigationToggle).toBeFocused();
 });
