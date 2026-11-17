@@ -906,8 +906,10 @@ export function StaffTicketDetailPage({
                   disabled={!comment.trim() || commentMutation.isPending || terminal}
                   isLoading={commentMutation.isPending}
                 >
-                  <Send aria-hidden="true" />
-                  Enviar comentario
+                  <span className="comment-form__submit-content">
+                    <Send aria-hidden="true" />
+                    Enviar comentario
+                  </span>
                 </Button>
               </form>
             ) : null}

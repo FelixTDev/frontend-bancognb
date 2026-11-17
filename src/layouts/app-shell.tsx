@@ -180,7 +180,6 @@ export function AppShell() {
       </aside>
       <div className="app-shell__body">
         <header className="app-header">
-          <BrandMark compact />
           <button
             ref={menuButtonRef}
             className="app-header__menu"

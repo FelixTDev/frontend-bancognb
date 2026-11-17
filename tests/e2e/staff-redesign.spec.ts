@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { expect, test, type Page, type Route } from "./fixtures";
 import type { Attachment, Comment, Ticket, TicketHistoryEntry, UserRole } from "../../src/shared/types/domain";
 
@@ -6,6 +7,60 @@ const supervisorId = "00000000-0000-4000-8000-000000000003";
 const newTicketId = "ticket-available-e2e";
 const assignedTicketId = "ticket-assigned-e2e";
 const clientId = "00000000-0000-4000-8000-000000000001";
+
+async function expectAppHeader(page: Page, context: string, name: string) {
+  const header = page.locator(".app-header");
+  const headerContext = header.locator(".app-header__context");
+  await expect(headerContext.locator("span")).toHaveText(context);
+  await expect(headerContext.locator("strong")).toHaveText(name);
+  await expect(headerContext.locator("span")).toBeVisible();
+  await expect(headerContext.locator("strong")).toBeVisible();
+  await expect(header.locator(".brand-mark")).toHaveCount(0);
+  await expect(page.locator(".sidebar .brand-mark")).toContainText(
+    "Banco - Atención de Tickets",
+  );
+}
+
+async function expectCommentButtonLayout(button: Locator) {
+  const metrics = await button.evaluate((element) => {
+    const content = element.querySelector<HTMLElement>(
+      ".comment-form__submit-content",
+    );
+    const icon = content?.querySelector<SVGElement>("svg");
+    const textNode = Array.from(content?.childNodes ?? []).find(
+      (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+    );
+    if (!content || !icon || !textNode) return null;
+
+    const textRange = document.createRange();
+    textRange.selectNodeContents(textNode);
+    const iconRect = icon.getBoundingClientRect();
+    const textRect = textRange.getBoundingClientRect();
+    const contentStyle = window.getComputedStyle(content);
+    return {
+      display: contentStyle.display,
+      alignItems: contentStyle.alignItems,
+      gap: Number.parseFloat(contentStyle.gap),
+      whiteSpace: contentStyle.whiteSpace,
+      iconFlexShrink: window.getComputedStyle(icon).flexShrink,
+      iconRight: iconRect.right,
+      textLeft: textRect.left,
+      centerDeltaY: Math.abs(
+        iconRect.top + iconRect.height / 2 - textRect.top - textRect.height / 2,
+      ),
+    };
+  });
+
+  expect(metrics).not.toBeNull();
+  if (!metrics) throw new Error("El contenido del botón no está disponible.");
+  expect(metrics.display).toBe("inline-flex");
+  expect(metrics.alignItems).toBe("center");
+  expect(metrics.gap).toBeGreaterThan(0);
+  expect(metrics.whiteSpace).toBe("nowrap");
+  expect(metrics.iconFlexShrink).toBe("0");
+  expect(metrics.textLeft).toBeGreaterThan(metrics.iconRight);
+  expect(metrics.centerDeltaY).toBeLessThanOrEqual(3);
+}
 
 function ticketFixture(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -792,6 +847,7 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
     await advisorPage.setViewportSize(viewport);
     await page.goto("/supervisor/cola");
     await expect(page.getByRole("heading", { name: "Cola de atención" })).toBeVisible();
+    await expectAppHeader(page, "Supervisión operativa", "Luis Rivas");
     if (viewport.width <= 1100) {
       await expect(page.locator("#staff-stage-tab-NUEVO")).toBeVisible();
       await expect(page.locator("#staff-stage-panel-ASIGNADO")).toBeHidden();
@@ -811,6 +867,9 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
 
     await page.goto(`/supervisor/tickets/${assignedTicketId}`);
     await expect(page.getByRole("heading", { name: "Revisión de una operación", level: 1 })).toBeVisible();
+    const supervisorCommentButton = page.getByRole("button", { name: "Enviar comentario" });
+    await expect(supervisorCommentButton).toBeDisabled();
+    await expectCommentButtonLayout(supervisorCommentButton);
     const dimensions = await page.evaluate(() => ({
       viewport: document.documentElement.clientWidth,
       content: document.documentElement.scrollWidth,
@@ -820,6 +879,7 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
 
     await advisorPage.goto("/asesor/panel");
     await expect(advisorPage.getByRole("heading", { name: "Kanban de atención" })).toBeVisible();
+    await expectAppHeader(advisorPage, "Atención operativa", "Ana Torres");
     const advisorBoardDimensions = await advisorPage.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
     expect(advisorBoardDimensions.content).toBeLessThanOrEqual(advisorBoardDimensions.viewport + 1);
     await capturePage(advisorPage, `advisor-board-${viewport.name}`);
@@ -832,6 +892,9 @@ test("tablero, historial y detalle ajustan el ancho a 1440, 820 y 390 px", async
       waitUntil: "domcontentloaded",
     });
     await expect(advisorPage.getByRole("heading", { name: "Revisión de una operación", level: 1 })).toBeVisible();
+    const advisorCommentButton = advisorPage.getByRole("button", { name: "Enviar comentario" });
+    await expect(advisorCommentButton).toBeDisabled();
+    await expectCommentButtonLayout(advisorCommentButton);
     const advisorDetailDimensions = await advisorPage.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
     expect(advisorDetailDimensions.content).toBeLessThanOrEqual(advisorDetailDimensions.viewport + 1);
     await capturePage(advisorPage, `advisor-detail-${viewport.name}`);

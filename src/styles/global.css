@@ -1465,23 +1465,18 @@ p {
   background: var(--surface-canvas);
   border-bottom: 1px solid var(--border-subtle);
 }
-.app-header > .brand-mark {
-  min-width: 0;
-  flex: 0 1 230px;
-  gap: var(--space-2);
-}
-.app-header > .brand-mark .brand-mark__icon {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-}
-.app-header > .brand-mark .brand-mark__text strong {
-  font-family: var(--font-body);
-  font-size: 0.88rem;
-  line-height: 1.2;
-}
 .app-header__context {
+  min-width: 0;
+  flex: 0 1 auto;
   display: grid;
+  gap: 0.1rem;
+}
+.app-header__context span,
+.app-header__context strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app-header__context span {
   color: var(--text-secondary);
@@ -1492,6 +1487,7 @@ p {
 .app-header__actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: var(--space-3);
   margin-left: auto;
 }
@@ -1890,6 +1886,7 @@ p {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
 }
 .comment-form__submit-content svg {
   width: 16px;
@@ -3544,19 +3541,15 @@ p {
     min-height: 66px;
     padding: 0 var(--space-4);
   }
-  .app-header > .brand-mark {
-    flex-basis: 195px;
+  .app-header__context {
+    flex: 1 1 auto;
   }
-  .app-header > .brand-mark .brand-mark__icon {
-    width: 30px;
-    height: 30px;
+  .app-header__context span {
+    font-size: 0.58rem;
+    letter-spacing: 0.055em;
   }
-  .app-header > .brand-mark .brand-mark__text strong {
-    font-size: 0.76rem;
-  }
-  .app-header__context span,
   .app-header__context strong {
-    display: none;
+    font-size: 0.74rem;
   }
   .app-content {
     min-height: calc(100svh - 132px);

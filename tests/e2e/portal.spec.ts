@@ -503,11 +503,17 @@ test("cliente inicia sesión, consulta solicitudes y no entra a supervisión", a
 }, testInfo) => {
   await login(page, "cliente@demo.com");
   await expect(page).toHaveURL(/\/app\/inicio$/);
-  await expect(
-    page
-      .locator(".app-header")
-      .getByRole("link", { name: "Banco - Atención de Tickets, inicio" }),
-  ).toBeVisible();
+  const appHeader = page.locator(".app-header");
+  const headerContext = appHeader.locator(".app-header__context");
+  await expect(headerContext.locator("span")).toHaveText("Portal de cliente");
+  await expect(headerContext.locator("strong")).toHaveText("Cliente E2E");
+  await expect(headerContext.locator("span")).toBeVisible();
+  await expect(headerContext.locator("strong")).toBeVisible();
+  await expect(appHeader.locator(".brand-mark")).toHaveCount(0);
+  await expect(page.locator(".sidebar .brand-mark")).toHaveAttribute(
+    "aria-label",
+    "Banco - Atención de Tickets, inicio",
+  );
   const appDisclaimer = page.getByText(academicDisclaimer, { exact: true });
   await expect(appDisclaimer).toBeVisible();
   const disclaimerFontSize = await appDisclaimer.evaluate((element) =>
