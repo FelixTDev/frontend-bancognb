@@ -15,7 +15,7 @@ const readyDraft: ChatbotTicketDraft = {
   status: "READY_FOR_CONFIRMATION",
   paused: false,
   fields: {
-    category_id: "category-digital",
+    category_id: "123e4567-e89b-42d3-a456-426614174000",
     subject: "No puedo ingresar a la banca móvil",
     description: "La aplicación no acepta mis credenciales desde hoy.",
     priority: "ALTA",
@@ -28,11 +28,22 @@ const readyDraft: ChatbotTicketDraft = {
 describe("ticket draft model", () => {
   it("creates the conversion payload only from a complete ready draft", () => {
     expect(getTicketDraftPayload(readyDraft)).toEqual({
-      category_id: "category-digital",
+      category_id: "123e4567-e89b-42d3-a456-426614174000",
       subject: "No puedo ingresar a la banca móvil",
       description: "La aplicación no acepta mis credenciales desde hoy.",
       priority: "ALTA",
     } satisfies TicketCreateInput);
+  });
+
+  it("retains the complete payload after the backend records explicit confirmation", () => {
+    expect(
+      getTicketDraftPayload({ ...readyDraft, status: "CONFIRMED" }),
+    ).toEqual({
+      category_id: readyDraft.fields?.category_id,
+      subject: readyDraft.fields?.subject,
+      description: readyDraft.fields?.description,
+      priority: readyDraft.fields?.priority,
+    });
   });
 
   it.each([
@@ -63,11 +74,14 @@ describe("ticket draft model", () => {
     expect(ticketDraftCorrectionMessage(payload, "Banca digital")).toBe(
       [
         "Quiero corregir los datos del borrador de ticket:",
-        "Categoría: Banca digital (category-digital)",
+        "Categoría: Banca digital",
         "Asunto: No puedo ingresar a la banca móvil",
         "Descripción: La aplicación no acepta mis credenciales desde hoy.",
         "Prioridad: Alta",
       ].join("\n"),
+    );
+    expect(ticketDraftCorrectionMessage(payload, "Banca digital")).not.toContain(
+      payload.category_id,
     );
   });
 });

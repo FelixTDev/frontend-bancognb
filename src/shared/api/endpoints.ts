@@ -46,12 +46,18 @@ export type Conversation = ApiSchemas["ConversationRead"];
 export type BotMessageResponse = ApiSchemas["BotMessageResponse"];
 export type ChatbotSuggestedAction = ApiSchemas["ChatbotSuggestedAction"];
 export type ChatbotSource = ApiSchemas["ChatbotSource"];
+export type ChatbotQuickReply = ApiSchemas["ChatbotQuickReply"];
 export type ChatbotUI = ApiSchemas["ChatbotUI"];
 export type ChatbotUIOption = ApiSchemas["ChatbotUIOption"];
 export type ChatFeedback = ApiSchemas["ChatFeedbackRead"];
 export type ChatMessageCreateInput = ApiSchemas["MessageCreate"];
 export type TicketCreateInput = ApiSchemas["TicketCreate"];
 export type ChatTicket = ApiSchemas["TicketRead"];
+export interface ChatTicketConversionResult {
+  readonly ticket: ChatTicket;
+  readonly status: number;
+  readonly recovered: boolean;
+}
 export type ChatbotTicketDraft = ApiSchemas["ChatbotTicketDraft"];
 export type ChatbotTicketDraftField = ApiSchemas["ChatbotTicketDraftField"];
 export type ChatbotConvertedTicketSummary =
@@ -233,13 +239,20 @@ export const api = {
       data<LinkedConversation>(
         http.request(`/chat/conversations/${id}/link-user`, { method: "POST" }),
       ),
-    convert: (id: string, body: TicketCreateInput) =>
-      data<ChatTicket>(
-        http.request(`/chat/conversations/${id}/convert-to-ticket`, {
-          method: "POST",
-          body,
-        }),
-      ),
+    convert: async (
+      id: string,
+      body: TicketCreateInput,
+    ): Promise<ChatTicketConversionResult> => {
+      const response = await http.request<ChatTicket>(
+        `/chat/conversations/${id}/convert-to-ticket`,
+        { method: "POST", body },
+      );
+      return {
+        ticket: response.data,
+        status: response.status,
+        recovered: response.status === 200,
+      };
+    },
   },
   tickets: {
     create: (body: Readonly<Record<string, unknown>>) =>

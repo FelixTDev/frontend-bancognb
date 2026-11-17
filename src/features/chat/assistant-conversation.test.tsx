@@ -218,4 +218,82 @@ describe("AssistantConversation", () => {
       });
     });
   });
+
+  it("renders the backend priority quick replies and submits their content unchanged", async () => {
+    const user = userEvent.setup();
+    const conversationId = "conversation-priority-test";
+    const draft: NonNullable<BotMessageResponse["ticket_draft"]> = {
+      status: "COLLECTING",
+      paused: false,
+      fields: { subject: "Acceso a banca móvil" },
+      missing_fields: ["PRIORITY"],
+      validation_errors: [],
+      category_options: [],
+    };
+    const sendMessage = vi
+      .spyOn(api.chat, "message")
+      .mockResolvedValueOnce(
+        reply("Elige una prioridad.", {
+          requires_clarification: true,
+          suggested_action: "ASK_CLARIFICATION",
+          ticket_draft: draft,
+          quick_replies: [
+            {
+              id: "draft-priority-urgent",
+              label: "Urgente",
+              content: "Prioridad: URGENTE",
+            },
+            {
+              id: "draft-cancel",
+              label: "Cancelar borrador",
+              content: "Cancelo el borrador",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(reply("Prioridad guardada.", { ticket_draft: draft }));
+
+    vi.spyOn(api.chat, "create").mockResolvedValue(
+      conversation(conversationId),
+    );
+    renderAssistant();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Escribe tu consulta" }),
+      "Quiero crear una solicitud{Enter}",
+    );
+
+    expect(await screen.findByRole("button", { name: "Urgente" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancelar borrador" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Urgente" })).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Urgente" }));
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenNthCalledWith(2, conversationId, {
+        content: "Prioridad: URGENTE",
+      });
+    });
+  });
+
+  it("hides UUID-shaped internal identifiers from visible chat messages", async () => {
+    const user = userEvent.setup();
+    const internalId = "123e4567-e89b-42d3-a456-426614174000";
+    vi.spyOn(api.chat, "create").mockResolvedValue(
+      conversation("conversation-uuid-test"),
+    );
+    vi.spyOn(api.chat, "message").mockResolvedValue(
+      reply("Encontré el ticket con referencia interna " + internalId),
+    );
+
+    renderAssistant();
+    await user.type(
+      screen.getByRole("textbox", { name: "Escribe tu consulta" }),
+      "Consulta el estado{Enter}",
+    );
+
+    await screen.findByText(/Encontré el ticket con referencia interna/u);
+    expect(document.body).not.toHaveTextContent(internalId);
+    expect(document.body).toHaveTextContent("[identificador oculto]");
+  });
 });

@@ -34,6 +34,7 @@ export class ApiError extends Error {
 
 export interface HttpResult<T> {
   readonly data: T;
+  readonly status: number;
   readonly requestId: string | null;
   readonly headers: Headers;
 }
@@ -118,12 +119,17 @@ export function createHttpClient(options: ClientOptions) {
     }
 
     if (response.status === 204)
-      return { data: undefined as T, requestId, headers: response.headers };
+      return {
+        data: undefined as T,
+        status: response.status,
+        requestId,
+        headers: response.headers,
+      };
     const contentType = response.headers.get("content-type") ?? "";
     const data = contentType.includes("application/json")
       ? ((await response.json()) as T)
       : ((await response.blob()) as T);
-    return { data, requestId, headers: response.headers };
+    return { data, status: response.status, requestId, headers: response.headers };
   }
   return { request };
 }

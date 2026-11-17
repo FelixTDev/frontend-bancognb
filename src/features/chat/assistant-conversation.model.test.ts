@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   BotMessageResponse,
+  ChatbotQuickReply,
   ChatbotUIOption,
 } from "../../shared/api/endpoints";
 import {
@@ -91,6 +92,18 @@ describe("assistant clarification choices", () => {
     expect(
       getAssistantClarificationChoices([], ["Consultar un saldo"]),
     ).toEqual([{ kind: "text", label: "Consultar un saldo" }]);
+  });
+
+  it("prefers backend quick replies and presents duplicate labels only once", () => {
+    const quickReply: ChatbotQuickReply = {
+      id: "draft-priority-urgent",
+      label: "Urgente",
+      content: "Prioridad: URGENTE",
+    };
+
+    expect(
+      getAssistantClarificationChoices([], [" urgente! "], [quickReply]),
+    ).toEqual([{ kind: "quick-reply", quickReply }]);
   });
 });
 

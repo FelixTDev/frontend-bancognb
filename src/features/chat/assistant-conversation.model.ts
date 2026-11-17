@@ -1,5 +1,6 @@
 import type {
   BotMessageResponse,
+  ChatbotQuickReply,
   ChatbotUIOption,
   ChatbotTicketDraft,
   ChatbotTicketDraftField,
@@ -64,6 +65,7 @@ export type AssistantRequestContext = "conversation" | "ticket";
 
 export type AssistantClarificationChoice =
   | { readonly kind: "structured"; readonly option: ChatbotUIOption }
+  | { readonly kind: "quick-reply"; readonly quickReply: ChatbotQuickReply }
   | { readonly kind: "text"; readonly label: string };
 
 function normalizeClarificationLabel(label: string): string {
@@ -78,6 +80,7 @@ function normalizeClarificationLabel(label: string): string {
 export function getAssistantClarificationChoices(
   structuredOptions: readonly ChatbotUIOption[],
   clarificationOptions: readonly string[] = [],
+  quickReplies: readonly ChatbotQuickReply[] = [],
 ): readonly AssistantClarificationChoice[] {
   const choices: AssistantClarificationChoice[] = [];
   const seenLabels = new Set<string>();
@@ -89,6 +92,13 @@ export function getAssistantClarificationChoices(
     choices.push({ kind: "structured", option });
   }
 
+  for (const quickReply of quickReplies) {
+    const normalizedLabel = normalizeClarificationLabel(quickReply.label);
+    if (!normalizedLabel || seenLabels.has(normalizedLabel)) continue;
+    seenLabels.add(normalizedLabel);
+    choices.push({ kind: "quick-reply", quickReply });
+  }
+
   for (const label of clarificationOptions) {
     const trimmedLabel = label.trim();
     const normalizedLabel = normalizeClarificationLabel(trimmedLabel);
@@ -98,6 +108,35 @@ export function getAssistantClarificationChoices(
   }
 
   return choices;
+}
+
+const normalizedPriorityLabels = new Set(
+  Object.values(ticketPriorityLabels).map(normalizeClarificationLabel),
+);
+
+export function getAssistantPriorityQuickReplies(
+  draft: ChatbotTicketDraft | null | undefined,
+  quickReplies: readonly ChatbotQuickReply[] = [],
+): readonly ChatbotQuickReply[] {
+  if (
+    draft?.status !== "COLLECTING" ||
+    !draft.missing_fields?.includes("PRIORITY")
+  ) {
+    return [];
+  }
+
+  const seenLabels = new Set<string>();
+  return quickReplies.filter((quickReply) => {
+    const normalizedLabel = normalizeClarificationLabel(quickReply.label);
+    if (
+      !normalizedPriorityLabels.has(normalizedLabel) ||
+      seenLabels.has(normalizedLabel)
+    ) {
+      return false;
+    }
+    seenLabels.add(normalizedLabel);
+    return true;
+  });
 }
 
 const assistantCategoryLabels: Record<string, string> = {
@@ -161,7 +200,12 @@ export function getTicketDraftFieldLabel(
 export function getTicketDraftPayload(
   draft: ChatbotTicketDraft | null | undefined,
 ): ReadyTicketDraftPayload | null {
-  if (draft?.status !== "READY_FOR_CONFIRMATION") return null;
+  if (
+    draft?.status !== "READY_FOR_CONFIRMATION" &&
+    draft?.status !== "CONFIRMED"
+  ) {
+    return null;
+  }
 
   const fields = draft.fields;
   if (
@@ -189,11 +233,18 @@ export function ticketDraftCorrectionMessage(
 ): string {
   return [
     "Quiero corregir los datos del borrador de ticket:",
-    `Categoría: ${categoryName} (${values.category_id})`,
+    `Categoría: ${categoryName}`,
     `Asunto: ${values.subject}`,
     `Descripción: ${values.description}`,
     `Prioridad: ${ticketPriorityLabels[values.priority]}`,
   ].join("\n");
+}
+
+const uuidPattern =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/giu;
+
+export function redactVisibleMessageIdentifiers(content: string): string {
+  return content.replace(uuidPattern, "[identificador oculto]");
 }
 
 export function getAssistantRequestErrorMessage(

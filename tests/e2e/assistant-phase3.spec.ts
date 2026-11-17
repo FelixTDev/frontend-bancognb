@@ -151,6 +151,7 @@ async function fulfillJson(route: Route, status: number, body: unknown) {
 interface MockState {
   conversation: Conversation;
   readonly sentMessages: string[];
+  readonly sentPayloads: ChatMessageCreateInput[];
   readonly conversionPayloads: TicketCreateInput[];
   readonly unhandledMutations: string[];
   createdConversations: number;
@@ -176,6 +177,7 @@ async function installMockApi(page: Page, options: MockOptions = {}) {
   const mock: MockState = {
     conversation: makeConversation(),
     sentMessages: [],
+    sentPayloads: [],
     conversionPayloads: [],
     unhandledMutations: [],
     createdConversations: 0,
@@ -263,6 +265,7 @@ async function installMockApi(page: Page, options: MockOptions = {}) {
       const content = messageBody.content ?? messageBody.option_id ?? "";
       const index = mock.sentMessages.length;
       mock.sentMessages.push(content);
+      mock.sentPayloads.push(messageBody);
       const response =
         options.onMessage?.(content, index, mock) ?? makeReply(content);
       mock.conversation = {
@@ -338,6 +341,23 @@ test("recopila varios campos, permite corregir y solo crea tras confirmar", asyn
   const mock = await openAssistant(page, {
     authenticated: true,
     onMessage: (content, index) => {
+      if (content === "Confirmo") {
+        return makeReply(
+          content,
+          makeDraft("CONFIRMED", {
+            fields: {
+              category_id: category.id,
+              subject: "Acceso bloqueado a la banca móvil",
+              description: "La aplicación no acepta mis credenciales desde esta mañana.",
+              priority: "URGENTE",
+            },
+          }),
+          {
+            suggested_action: "CONVERT_TO_TICKET",
+            bot_message: message("confirmed", "BOT", "Registraré la solicitud confirmada."),
+          },
+        );
+      }
       if (index === 0) {
         return makeReply(
           content,
@@ -420,6 +440,7 @@ test("recopila varios campos, permite corregir y solo crea tras confirmar", asyn
     name: "Confirmar creación del ticket",
   });
   await confirm.dblclick();
+  await expect.poll(() => mock.sentMessages).toContain("Confirmo");
   await expect(draft.getByText("TCK-2026-PHASE3")).toBeVisible();
   await expect(draft.getByRole("link", { name: "Ver detalle de la solicitud" }))
     .toHaveAttribute("href", "/app/solicitudes/created-phase3-ticket");
@@ -431,6 +452,7 @@ test("recopila varios campos, permite corregir y solo crea tras confirmar", asyn
     description: "La aplicación no acepta mis credenciales desde esta mañana.",
     priority: "URGENTE",
   });
+  expect(mock.sentMessages).toHaveLength(4);
   expect(mock.unhandledMutations).toEqual([]);
 
   await page.reload();
@@ -473,6 +495,124 @@ test("retoma la conversación al autenticarse y no duplica mensajes ni convierte
   expect(mock.sentMessages).toHaveLength(1);
   expect(mock.linkedConversations).toBe(1);
   expect(mock.conversionPayloads).toHaveLength(0);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
+test("presenta la prioridad desde quick_replies y envía el contenido del contrato sin UUID", async ({
+  page,
+}) => {
+  const internalCategoryId = "123e4567-e89b-42d3-a456-426614174000";
+  const mock = await openAssistant(page, {
+    authenticated: true,
+    onMessage: (content) => {
+      if (content === "Prioridad: URGENTE") {
+        return makeReply(
+          content,
+          ready({
+            fields: {
+              category_id: internalCategoryId,
+              subject: "Acceso bloqueado a la banca móvil",
+              description: "La aplicación rechaza mis credenciales desde hoy.",
+              priority: "URGENTE",
+            },
+          }),
+        );
+      }
+      return makeReply(
+        content,
+        makeDraft("COLLECTING", {
+          fields: {
+            category_id: internalCategoryId,
+            subject: "Acceso bloqueado a la banca móvil",
+            description: "La aplicación rechaza mis credenciales desde hoy.",
+          },
+          missing_fields: ["PRIORITY"],
+        }),
+        {
+          requires_clarification: true,
+          suggested_action: "ASK_CLARIFICATION",
+          quick_replies: [
+            {
+              id: "draft-priority-urgent",
+              label: "Urgente",
+              content: "Prioridad: URGENTE",
+            },
+            {
+              id: "draft-cancel",
+              label: "Cancelar borrador",
+              content: "Cancelo el borrador",
+            },
+          ],
+        },
+      );
+    },
+  });
+
+  await sendMessage(page, "Quiero crear una solicitud por el acceso.");
+  const draft = page.locator(".assistant-ticket-draft");
+  await expect(draft.getByText("Falta completar:")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Urgente" })).toBeVisible();
+  await page.getByRole("button", { name: "Urgente" }).click();
+  await expect(draft.getByRole("heading", { name: "Revisa tu solicitud" })).toBeVisible();
+
+  expect(mock.sentMessages).toEqual([
+    "Quiero crear una solicitud por el acceso.",
+    "Prioridad: URGENTE",
+  ]);
+  expect(mock.sentPayloads).toEqual([
+    { content: "Quiero crear una solicitud por el acceso." },
+    { content: "Prioridad: URGENTE" },
+  ]);
+  const visibleMessages = await page.locator(".assistant-message").allTextContents();
+  expect(visibleMessages.join(" ")).not.toContain(internalCategoryId);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
+test("selecciona una categoría del borrador sin exponer su UUID en el mensaje", async ({
+  page,
+}) => {
+  const internalCategoryId = "123e4567-e89b-42d3-a456-426614174000";
+  const mock = await openAssistant(page, {
+    authenticated: true,
+    onMessage: (content, index) =>
+      index === 0
+        ? makeReply(
+            content,
+            makeDraft("COLLECTING", {
+              fields: { subject: "Acceso bloqueado" },
+              missing_fields: ["CATEGORY_ID"],
+              category_options: [
+                { id: internalCategoryId, name: "BANCA_DIGITAL" },
+              ],
+            }),
+          )
+        : makeReply(
+            content,
+            ready({
+              fields: {
+                category_id: internalCategoryId,
+                subject: "Acceso bloqueado",
+                description: "La aplicación rechaza mis credenciales desde hoy.",
+                priority: "ALTA",
+              },
+            }),
+          ),
+  });
+
+  await sendMessage(page, "Quiero registrar un problema de banca digital.");
+  await page
+    .locator(".assistant-ticket-draft")
+    .getByRole("button", { name: "Banca Digital" })
+    .click();
+  await expect(
+    page.locator(".assistant-ticket-draft").getByRole("heading", {
+      name: "Revisa tu solicitud",
+    }),
+  ).toBeVisible();
+
+  expect(mock.sentPayloads[1]).toEqual({ content: "Categoría: Banca Digital" });
+  const visibleMessages = await page.locator(".assistant-message").allTextContents();
+  expect(visibleMessages.join(" ")).not.toContain(internalCategoryId);
   expect(mock.unhandledMutations).toEqual([]);
 });
 
@@ -655,7 +795,12 @@ test("recupera con 200 un reintento idéntico tras perderse la respuesta", async
   let attempts = 0;
   const mock = await openAssistant(page, {
     authenticated: true,
-    onMessage: (content) => makeReply(content, ready()),
+    onMessage: (content) =>
+      content === "Confirmo"
+        ? makeReply(content, makeDraft("CONFIRMED", { fields: ready().fields }), {
+            suggested_action: "CONVERT_TO_TICKET",
+          })
+        : makeReply(content, ready()),
     onConvert: async (route, requestBody, state) => {
       attempts += 1;
       if (attempts === 1) {
@@ -672,6 +817,8 @@ test("recupera con 200 un reintento idéntico tras perderse la respuesta", async
   await expect(page.getByRole("alert").filter({ hasText: /conectar/i })).toBeVisible();
   await draft.getByRole("button", { name: "Reintentar confirmación" }).click();
   await expect(draft.getByText("TCK-2026-PHASE3")).toBeVisible();
+  await expect(draft.getByText("Solicitud recuperada")).toBeVisible();
+  await expect(draft.getByText("Tu solicitud quedó registrada")).toHaveCount(0);
   expect(attempts).toBe(2);
   expect(mock.conversionPayloads).toEqual([payload, payload]);
   expect(mock.unhandledMutations).toEqual([]);
@@ -680,7 +827,12 @@ test("recupera con 200 un reintento idéntico tras perderse la respuesta", async
 test("un 409 se presenta como conflicto y nunca como éxito", async ({ page }) => {
   const mock = await openAssistant(page, {
     authenticated: true,
-    onMessage: (content) => makeReply(content, ready()),
+    onMessage: (content) =>
+      content === "Confirmo"
+        ? makeReply(content, makeDraft("CONFIRMED", { fields: ready().fields }), {
+            suggested_action: "CONVERT_TO_TICKET",
+          })
+        : makeReply(content, ready()),
     onConvert: async (route, requestBody, state) => {
       commitTicket(state, {
         ...requestBody,
@@ -699,6 +851,7 @@ test("un 409 se presenta como conflicto y nunca como éxito", async ({ page }) =
   await draft.getByRole("button", { name: "Confirmar creación del ticket" }).click();
   await expect(draft.getByRole("heading", { name: "La conversación ya tiene otro ticket" })).toBeVisible();
   await expect(draft.getByText("TCK-2026-PHASE3")).toBeVisible();
+  await expect(draft.getByText("No puedo ingresar a la banca móvil")).toBeVisible();
   await expect(draft.getByText("Tu solicitud quedó registrada")).toHaveCount(0);
   await expect(draft.getByRole("link", { name: "Ver detalle de la solicitud" })).toBeVisible();
   expect(mock.conversionPayloads).toHaveLength(1);
@@ -715,7 +868,12 @@ test("muestra errores 422 del servidor y conserva el borrador para corregirlo", 
   });
   const mock = await openAssistant(page, {
     authenticated: true,
-    onMessage: (content) => makeReply(content, ready()),
+    onMessage: (content) =>
+      content === "Confirmo"
+        ? makeReply(content, makeDraft("CONFIRMED", { fields: ready().fields }), {
+            suggested_action: "CONVERT_TO_TICKET",
+          })
+        : makeReply(content, ready()),
     onConvert: async (route, _requestBody, state) => {
       state.conversation = {
         ...state.conversation,
@@ -748,7 +906,12 @@ for (const status of [429, 503]) {
     let attempts = 0;
     const mock = await openAssistant(page, {
       authenticated: true,
-      onMessage: (content) => makeReply(content, ready()),
+      onMessage: (content) =>
+        content === "Confirmo"
+          ? makeReply(content, makeDraft("CONFIRMED", { fields: ready().fields }), {
+              suggested_action: "CONVERT_TO_TICKET",
+            })
+          : makeReply(content, ready()),
       onConvert: async (route, payload, state) => {
         attempts += 1;
         if (attempts === 1) {

@@ -370,6 +370,74 @@ test("lista los tickets devueltos y pagina con el mensaje que reconoce el backen
   expect(mock.unhandledMutations).toEqual([]);
 });
 
+test("envía los seguimientos ordinales por el mismo flujo conversacional del backend", async ({
+  page,
+}) => {
+  const firstTicket = ticket({
+    tracking_code: "TCK-ORDINAL-1",
+    subject: "Consulta sobre mi tarjeta",
+  });
+  const secondTicket = ticket({
+    tracking_code: "TCK-ORDINAL-2",
+    subject: "Acceso a banca móvil",
+  });
+  const mock = await openAssistant(page);
+  mock.setResponder((content) => {
+    if (content === "Muéstrame mis tickets") {
+      return reply("LIST_MY_TICKETS", {
+        query_type: "TICKET_LIST",
+        authentication_required: false,
+        found: true,
+        tickets: [firstTicket, secondTicket],
+        total: 2,
+        pagination: { page: 1, page_size: 5, total_pages: 1 },
+      });
+    }
+    const secondReference = content === "¿y el segundo?";
+    const selectedTicket = secondReference ? secondTicket : firstTicket;
+    return reply(
+      "TICKET_STATUS",
+      {
+        query_type: "TICKET_STATUS",
+        authentication_required: false,
+        found: true,
+        ticket: selectedTicket,
+        tickets: [],
+      },
+      selectedTicket.subject,
+    );
+  });
+
+  await sendMessage(page, "Muéstrame mis tickets");
+  await expect(page.locator(".assistant-ticket-card")).toHaveCount(2);
+  await sendMessage(page, "¿qué asunto tiene el primero?");
+  await expect(
+    page
+      .locator(".assistant-ticket-query")
+      .last()
+      .getByRole("heading", { name: "Consulta sobre mi tarjeta", exact: true }),
+  ).toBeVisible();
+  await sendMessage(page, "¿y el segundo?");
+  await expect(
+    page
+      .locator(".assistant-ticket-query")
+      .last()
+      .getByRole("heading", { name: "Acceso a banca móvil", exact: true }),
+  ).toBeVisible();
+
+  expect(mock.messageBodies).toEqual([
+    "Muéstrame mis tickets",
+    "¿qué asunto tiene el primero?",
+    "¿y el segundo?",
+  ]);
+  expect(mock.messagePayloads).toEqual([
+    { content: "Muéstrame mis tickets" },
+    { content: "¿qué asunto tiene el primero?" },
+    { content: "¿y el segundo?" },
+  ]);
+  expect(mock.unhandledMutations).toEqual([]);
+});
+
 test("muestra conteo y último ticket con los datos tipados devueltos", async ({
   page,
 }) => {

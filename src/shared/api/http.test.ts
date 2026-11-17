@@ -24,6 +24,7 @@ describe("http client", () => {
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get("Authorization")).toBe("Bearer secure-token");
     expect(headers.get("X-Request-ID")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.status).toBe(200);
     expect(result.requestId).toBe("server-request");
   });
 

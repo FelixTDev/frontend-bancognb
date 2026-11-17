@@ -1313,7 +1313,7 @@ function ConvertConversationDialog({
   const conversion = useMutation({
     mutationFn: (values: TicketValues) =>
       api.chat.convert(conversation.id, values),
-    onSuccess: async (ticket) => {
+    onSuccess: async ({ ticket }) => {
       clearPendingTicketConversion(conversation.id);
       setCreatedTicket(ticket);
       await queryClient.invalidateQueries({ queryKey: ["tickets"] });

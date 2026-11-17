@@ -20,6 +20,7 @@ interface AssistantTicketDraftProps {
   readonly conversationStatus: string | undefined;
   readonly draft: ChatbotTicketDraft | undefined;
   readonly convertedTicket: ChatbotConvertedTicketSummary | null | undefined;
+  readonly conversionRecovered: boolean | null;
   readonly categories: readonly Category[] | undefined;
   readonly categoriesLoading: boolean;
   readonly categoriesError: boolean;
@@ -29,13 +30,13 @@ interface AssistantTicketDraftProps {
   readonly conversionRetryAvailable: boolean;
   readonly conversionConflict: boolean;
   readonly onRequireAuth: () => void;
-  readonly onSelectCategory: (id: string, categoryName: string) => void;
+  readonly onSelectCategory: (categoryName: string) => void;
   readonly onCorrect: (
     body: ReadyTicketDraftPayload,
     categoryName: string,
   ) => void;
   readonly onCancel: () => void;
-  readonly onConfirm: (body: ReadyTicketDraftPayload) => void;
+  readonly onConfirm: () => void;
   readonly onRetry: () => void;
 }
 
@@ -59,6 +60,51 @@ function categoryNameFor(
 ): string {
   const name = options.find((option) => option.id === categoryId)?.name;
   return name ? formatCategoryDisplayName(name) : "Categoría seleccionada";
+}
+
+function ConflictedDraftSummary({
+  draft,
+}: {
+  readonly draft: ChatbotTicketDraft | undefined;
+}) {
+  const fields = draft?.fields;
+  if (!fields) return null;
+
+  return (
+    <section aria-label="Borrador conservado">
+      <h4>Borrador conservado</h4>
+      <dl className="assistant-ticket-draft__fields">
+        {fields.category_id !== undefined ? (
+          <div>
+            <dt>Categoría</dt>
+            <dd>{draft.category_name ?? "Categoría seleccionada"}</dd>
+          </div>
+        ) : null}
+        {fields.subject !== undefined ? (
+          <div>
+            <dt>Asunto</dt>
+            <dd>{fields.subject || "Por definir"}</dd>
+          </div>
+        ) : null}
+        {fields.description !== undefined ? (
+          <div>
+            <dt>Descripción</dt>
+            <dd>{fields.description || "Por definir"}</dd>
+          </div>
+        ) : null}
+        {fields.priority !== undefined ? (
+          <div>
+            <dt>Prioridad</dt>
+            <dd>
+              {fields.priority
+                ? ticketPriorityLabels[fields.priority]
+                : "Por definir"}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
+  );
 }
 
 function TicketDraftEditor({
@@ -199,6 +245,7 @@ export function AssistantTicketDraft({
   conversationStatus,
   draft,
   convertedTicket,
+  conversionRecovered,
   categories,
   categoriesLoading,
   categoriesError,
@@ -229,17 +276,24 @@ export function AssistantTicketDraft({
               El contenido enviado no coincide con la solicitud existente. No
               enviamos otra conversión.
             </p>
+            <ConflictedDraftSummary draft={draft} />
           </>
         ) : (
           <>
             <span className="assistant-ticket-draft__eyebrow">
-              Solicitud confirmada
+              {conversionRecovered ?? true
+                ? "Solicitud recuperada"
+                : "Solicitud confirmada"}
             </span>
             <h3 id="assistant-converted-ticket-title">
-              Tu solicitud quedó registrada
+              {conversionRecovered ?? true
+                ? "Recuperamos tu solicitud"
+                : "Tu solicitud quedó registrada"}
             </h3>
             <p role="status">
-              El servidor confirmó el ticket asociado a esta conversación.
+              {conversionRecovered ?? true
+                ? "El servidor devolvió el ticket ya creado para esta conversación."
+                : "El servidor confirmó el ticket asociado a esta conversación."}
             </p>
           </>
         )}
@@ -271,6 +325,7 @@ export function AssistantTicketDraft({
       >
         <h3>Esta conversación ya fue convertida</h3>
         <p>No volveremos a enviar la conversión desde esta conversación.</p>
+        <ConflictedDraftSummary draft={draft} />
       </section>
     );
   }
@@ -298,7 +353,8 @@ export function AssistantTicketDraft({
   const payload = getTicketDraftPayload(draft);
   const fields = draft.fields;
   const readyStatus = draft.status === "READY_FOR_CONFIRMATION";
-  const isReady = readyStatus && payload !== null;
+  const confirmedStatus = draft.status === "CONFIRMED";
+  const isReady = (readyStatus || confirmedStatus) && payload !== null;
   const options = categoryOptionsFor(draft, categories);
   const category = fields?.category_id
     ? categoryNameFor(fields.category_id, options)
@@ -312,18 +368,22 @@ export function AssistantTicketDraft({
     >
       <div className="assistant-ticket-draft__heading">
         <span className="assistant-ticket-draft__eyebrow">
-          {readyStatus ? "Revisión" : "Recopilación"}
+          {confirmedStatus ? "Confirmación" : readyStatus ? "Revisión" : "Recopilación"}
         </span>
         <h3 id="assistant-ticket-draft-title">
           {isReady
-            ? "Revisa tu solicitud"
+            ? confirmedStatus
+              ? "Confirmación registrada"
+              : "Revisa tu solicitud"
             : readyStatus
               ? "Corrige los datos del borrador"
               : "Estamos preparando tu solicitud"}
         </h3>
         <p>
           {isReady
-            ? "Comprueba los datos. El ticket solo se enviará cuando confirmes."
+            ? confirmedStatus
+              ? "Confirmaste el resumen. El servicio está registrando tu solicitud."
+              : "Comprueba los datos. El ticket solo se enviará cuando confirmes."
             : readyStatus
               ? "Corrige los campos señalados antes de confirmar la creación."
               : "El asistente conservará los datos reunidos y te preguntará por lo que falte."}
@@ -393,7 +453,7 @@ export function AssistantTicketDraft({
               type="button"
               key={option.id}
               disabled={chatPending || conversionPending}
-              onClick={() => onSelectCategory(option.id, option.name)}
+              onClick={() => onSelectCategory(option.name)}
             >
               {formatCategoryDisplayName(option.name)}
             </button>
@@ -414,6 +474,8 @@ export function AssistantTicketDraft({
           conversionPending={conversionPending}
           conversionRetryAvailable={conversionRetryAvailable}
           conversionConflict={conversionConflict}
+          canEdit={readyStatus}
+          canConfirm={readyStatus}
           onRequireAuth={onRequireAuth}
           onCorrect={onCorrect}
           onCancel={onCancel}
@@ -454,6 +516,8 @@ function ReadyDraftActions({
   conversionPending,
   conversionRetryAvailable,
   conversionConflict,
+  canEdit,
+  canConfirm,
   onRequireAuth,
   onCorrect,
   onCancel,
@@ -470,13 +534,15 @@ function ReadyDraftActions({
   readonly conversionPending: boolean;
   readonly conversionRetryAvailable: boolean;
   readonly conversionConflict: boolean;
+  readonly canEdit: boolean;
+  readonly canConfirm: boolean;
   readonly onRequireAuth: () => void;
   readonly onCorrect: (
     body: ReadyTicketDraftPayload,
     categoryName: string,
   ) => void;
   readonly onCancel: () => void;
-  readonly onConfirm: (body: ReadyTicketDraftPayload) => void;
+  readonly onConfirm: () => void;
   readonly onRetry: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -511,37 +577,47 @@ function ReadyDraftActions({
     <>
       {authenticated ? (
         <div className="assistant-ticket-draft__actions">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={chatPending || conversionPending || conversionConflict}
-            onClick={() => setEditing(true)}
-          >
-            Editar datos
-          </Button>
-          <Button
-            type="button"
-            variant="quiet"
-            disabled={chatPending || conversionPending || conversionConflict}
-            onClick={onCancel}
-          >
-            Cancelar borrador
-          </Button>
-          <Button
-            type="button"
-            disabled={chatPending || conversionPending || conversionConflict}
-            isLoading={conversionPending}
-            onClick={() => onConfirm(payload)}
-          >
-            Confirmar creación del ticket
-          </Button>
+          {canEdit ? (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={chatPending || conversionPending || conversionConflict}
+                onClick={() => setEditing(true)}
+              >
+                Editar datos
+              </Button>
+              <Button
+                type="button"
+                variant="quiet"
+                disabled={chatPending || conversionPending || conversionConflict}
+                onClick={onCancel}
+              >
+                Cancelar borrador
+              </Button>
+            </>
+          ) : null}
+          {canConfirm ? (
+            <Button
+              type="button"
+              disabled={chatPending || conversionPending || conversionConflict}
+              isLoading={chatPending}
+              onClick={onConfirm}
+            >
+              Confirmar creación del ticket
+            </Button>
+          ) : null}
         </div>
-      ) : (
+      ) : canConfirm || draft.status === "CONFIRMED" ? (
         <section
           className="assistant-ticket-draft__auth"
           aria-label="Autenticación requerida"
         >
-          <strong>Inicia sesión para confirmar el ticket</strong>
+          <strong>
+            {canConfirm
+              ? "Inicia sesión para confirmar el ticket"
+              : "Inicia sesión para registrar el ticket"}
+          </strong>
           <p>Tu conversación se conservará y se retomará al volver.</p>
           <div>
             <Link
@@ -558,7 +634,7 @@ function ReadyDraftActions({
             </Link>
           </div>
         </section>
-      )}
+      ) : null}
       {conversionRetryAvailable ? (
         <div className="assistant-ticket-draft__retry">
           <p>La respuesta no llegó. Puedes reintentar con el mismo borrador.</p>

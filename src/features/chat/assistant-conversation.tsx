@@ -49,8 +49,11 @@ import {
   getSafeAssistantSourceUrl,
   getAssistantRequestErrorMessage,
   getAssistantClarificationChoices,
+  getAssistantPriorityQuickReplies,
+  getTicketDraftPayload,
   formatAssistantOptionLabel,
   formatAssistantMessage,
+  redactVisibleMessageIdentifiers,
   ticketDraftCorrectionMessage,
   type ReadyTicketDraftPayload,
 } from "./assistant-conversation.model";
@@ -246,13 +249,19 @@ function AssistantClarificationOptions({
     >
       {choices.map((choice) => {
         const label =
-          choice.kind === "structured" ? choice.option.label : choice.label;
+          choice.kind === "structured"
+            ? choice.option.label
+            : choice.kind === "quick-reply"
+              ? choice.quickReply.label
+              : choice.label;
         const displayLabel = formatAssistantOptionLabel(label);
         return (
           <button
             key={
               choice.kind === "structured"
                 ? `structured-${choice.option.id}`
+              : choice.kind === "quick-reply"
+                ? `quick-reply-${choice.quickReply.id}`
                 : `text-${label}`
             }
             type="button"
@@ -322,7 +331,7 @@ const toVisibleMessages = (
       message.sender_type.toUpperCase() === "USER" ? "user" : "bot";
     return {
       id: message.id,
-      content: message.content,
+      content: redactVisibleMessageIdentifiers(message.content),
       sender,
       responseStatus:
         sender === "bot"
@@ -651,6 +660,9 @@ export function AssistantConversation({
   const [retryTicketPayload, setRetryTicketPayload] =
     useState<ReadyTicketDraftPayload | null>(null);
   const [conversionConflict, setConversionConflict] = useState(false);
+  const [conversionRecovered, setConversionRecovered] = useState<boolean | null>(
+    null,
+  );
   const [lifecycleConfirmation, setLifecycleConfirmation] = useState<
     "end" | "restart" | null
   >(null);
@@ -660,6 +672,7 @@ export function AssistantConversation({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const lifecycleTriggerRef = useRef<HTMLElement | null>(null);
   const conversionInFlightRef = useRef(false);
+  const autoConversionKeyRef = useRef<string | null>(null);
   const resumedPendingConversionRef = useRef<string | null>(null);
   const linkedConversationIdsRef = useRef(new Set<string>());
   const pendingLinkRequestsRef = useRef(new Map<string, Promise<void>>());
@@ -875,7 +888,11 @@ export function AssistantConversation({
       if (appendUser) {
         setMessages((current) => [
           ...current,
-          { id: crypto.randomUUID(), content: displayContent, sender: "user" },
+          {
+            id: crypto.randomUUID(),
+            content: redactVisibleMessageIdentifiers(displayContent),
+            sender: "user",
+          },
         ]);
         setValue("");
       }
@@ -894,7 +911,7 @@ export function AssistantConversation({
         ...current,
         {
           id: response.bot_message.id,
-          content: response.bot_message.content,
+          content: redactVisibleMessageIdentifiers(response.bot_message.content),
           sender: "bot",
           responseStatus: getAssistantResponseStatus(response),
           sources: response.sources ?? [],
@@ -1000,6 +1017,8 @@ export function AssistantConversation({
       setEscalationMessage(null);
       setRetryTicketPayload(null);
       setConversionConflict(false);
+      setConversionRecovered(null);
+      autoConversionKeyRef.current = null;
       setValue("");
       window.requestAnimationFrame(() => composerRef.current?.focus());
     },
@@ -1041,7 +1060,7 @@ export function AssistantConversation({
       setError(null);
       setConversionConflict(false);
     },
-    onSuccess: async (ticket) => {
+    onSuccess: async ({ ticket, recovered }) => {
       const convertedTicket: ChatbotConvertedTicketSummary = {
         id: ticket.id,
         tracking_code: ticket.tracking_code,
@@ -1058,6 +1077,7 @@ export function AssistantConversation({
           : current,
       );
       setError(null);
+      setConversionRecovered(recovered);
       setRetryTicketPayload(null);
       clearPendingTicketConversion(conversation?.id);
       await queryClient.invalidateQueries({ queryKey: ["tickets"] });
@@ -1081,6 +1101,47 @@ export function AssistantConversation({
       }
     },
   });
+  const convertTicket = ticketConversion.mutate;
+  const isConvertingTicket = ticketConversion.isPending;
+
+  useEffect(() => {
+    const payload = getTicketDraftPayload(ticketDraft);
+    if (
+      !authenticated ||
+      !conversation ||
+      isRestoring ||
+      terminalConversation ||
+      ticketDraft?.status !== "CONFIRMED" ||
+      !payload ||
+      (lastReply && lastReply.suggested_action !== "CONVERT_TO_TICKET") ||
+      isConvertingTicket
+    ) {
+      return;
+    }
+
+    const key = `${conversation.id}:${JSON.stringify(payload)}`;
+    if (autoConversionKeyRef.current === key || conversionInFlightRef.current) {
+      return;
+    }
+
+    autoConversionKeyRef.current = key;
+    conversionInFlightRef.current = true;
+    saveActiveConversationId(conversation.id);
+    convertTicket(payload, {
+      onSettled: () => {
+        conversionInFlightRef.current = false;
+      },
+    });
+  }, [
+    authenticated,
+    conversation,
+    isRestoring,
+    lastReply,
+    terminalConversation,
+    ticketDraft,
+    convertTicket,
+    isConvertingTicket,
+  ]);
 
   const submit = useCallback(
     (
@@ -1180,15 +1241,35 @@ export function AssistantConversation({
         conversation?.status ?? lastReply.conversation_status ?? "",
       )
     : null;
+  const priorityQuickReplies = getAssistantPriorityQuickReplies(
+    ticketDraft,
+    lastReply?.quick_replies ?? [],
+  );
+  const hasActiveDraft = Boolean(
+    ticketDraft &&
+      !ticketDraft.paused &&
+      ticketDraft.status !== "INACTIVE" &&
+      ticketDraft.status !== "CANCELLED",
+  );
+  const displayedQuickReplies = hasActiveDraft
+    ? priorityQuickReplies
+    : (lastReply?.quick_replies ?? []);
   const clarificationChoices = getAssistantClarificationChoices(
     currentUi?.options ?? [],
     lastReply?.clarification_options ?? [],
+    displayedQuickReplies,
+  );
+  const isLatestBotReply = Boolean(
+    messages.at(-1)?.sender === "bot" &&
+      messages.at(-1)?.id === lastReply?.bot_message.id,
+  );
+  const showInlineClarification = Boolean(
+    isLatestBotReply &&
+      (replyPresentation?.needsClarification || displayedQuickReplies.length > 0),
   );
   const inlineClarificationOptionsVisible = Boolean(
     clarificationChoices.length > 0 &&
-      replyPresentation?.needsClarification &&
-      messages.at(-1)?.sender === "bot" &&
-      messages.at(-1)?.id === lastReply?.bot_message.id,
+      showInlineClarification,
   );
   const ticketQueryPresentation = lastReply
     ? getAssistantTicketQueryPresentation(lastReply)
@@ -1240,6 +1321,7 @@ export function AssistantConversation({
         conversationStatus={conversation?.status}
         draft={ticketDraft}
         convertedTicket={conversation?.converted_ticket}
+        conversionRecovered={conversionRecovered}
         categories={categories.data}
         categoriesLoading={categories.isLoading}
         categoriesError={categories.isError}
@@ -1251,10 +1333,8 @@ export function AssistantConversation({
         onRequireAuth={() => {
           if (conversation) saveActiveConversationId(conversation.id);
         }}
-        onSelectCategory={(id, name) =>
-          submit(
-            `Selecciono la categoría ${formatCategoryDisplayName(name)} (${id}).`,
-          )
+        onSelectCategory={(name) =>
+          submit(`Categoría: ${formatCategoryDisplayName(name)}`)
         }
         onCorrect={(body, categoryName) =>
           submit(ticketDraftCorrectionMessage(body, categoryName))
@@ -1262,7 +1342,7 @@ export function AssistantConversation({
         onCancel={() =>
           submit("Cancela el borrador del ticket. No deseo continuar con su creación.")
         }
-        onConfirm={confirmTicket}
+        onConfirm={() => submit("Confirmo")}
         onRetry={retryTicketConversion}
       />
     );
@@ -1447,12 +1527,16 @@ export function AssistantConversation({
                   ) : null}
                   {isLatestReply ? (
                     <div className="assistant-message__details">
-                      {replyPresentation?.needsClarification ? (
+                      {showInlineClarification ? (
                         <div className="assistant-clarification">
                           <strong>
-                            {clarificationChoices.length
-                              ? "¿Te refieres a alguna de estas consultas?"
-                              : "Para orientarte mejor, aclara un poco tu consulta."}
+                            {priorityQuickReplies.length
+                              ? "Elige una prioridad para continuar."
+                              : !replyPresentation?.needsClarification
+                                ? "También puedes elegir una de estas opciones."
+                              : clarificationChoices.length
+                                ? "¿Te refieres a alguna de estas consultas?"
+                                : "Para orientarte mejor, aclara un poco tu consulta."}
                           </strong>
                           {clarificationChoices.length ? (
                             <AssistantClarificationOptions
@@ -1463,7 +1547,9 @@ export function AssistantConversation({
                               onSelect={(choice) =>
                                 choice.kind === "structured"
                                   ? submitOption(choice.option)
-                                  : submit(choice.label)
+                                  : choice.kind === "quick-reply"
+                                    ? submit(choice.quickReply.content)
+                                    : submit(choice.label)
                               }
                             />
                           ) : null}

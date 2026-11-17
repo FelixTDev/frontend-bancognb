@@ -514,6 +514,8 @@ test("la fuente de recuperación de contraseña conserva el enlace oficial devue
   });
   const widget = page.getByRole("dialog", { name: "Asistente GNB" });
 
+  await expect(widget.locator('input[type="password"]')).toHaveCount(0);
+
   await sendMessage(page, "Olvidé mi contraseña");
   await widget
     .getByRole("button", {
