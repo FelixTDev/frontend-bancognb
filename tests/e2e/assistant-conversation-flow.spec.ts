@@ -7,6 +7,8 @@ const cardInternetFaqId = "44444444-4444-4444-8444-444444444444";
 const passwordFaqId = "33333333-3333-4333-8333-333333333333";
 const recoveryGuideUrl =
   "https://www.bancognb.com.pe/main/download?file=peru%2Fbanca_personas%2Fguia-cambio-de-contrasenia.pdf";
+const safeFaqFallback =
+  "No tengo información verificada para responder esta consulta financiera. Puedo orientarte de forma general o ayudarte a registrar un ticket.";
 
 function message(id: string, sender: "USER" | "BOT", content: string) {
   return {
@@ -101,7 +103,7 @@ async function openPublicAssistant(
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+  await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
   return sentBodies;
 }
 
@@ -227,7 +229,7 @@ test("recorre saludo, categorías, FAQ, aclaración y nueva consulta sin perder 
           {
             title: "Consultas y bloqueos 24 horas",
             category: "TARJETAS",
-            url: "https://www.bancognb.com.pe/inicio/servicio-cliente/reclamaciones-consulta-24hr",
+            url: "https://example.test/help/tarjetas",
             verified_at: "2026-11-15T00:00:00Z",
           },
         ],
@@ -294,7 +296,7 @@ test("recorre saludo, categorías, FAQ, aclaración y nueva consulta sin perder 
       },
     });
   });
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
 
   await sendMessage(page, "hola");
   await expect(
@@ -332,17 +334,10 @@ test("recorre saludo, categorías, FAQ, aclaración y nueva consulta sin perder 
       hasText: "Respuesta generada con IA.",
     }),
   ).toBeVisible();
-  await widget.locator(".assistant-sources > summary").click();
-  const cardSource = widget.getByRole("link", {
-    name: "Consultas y bloqueos 24 horas",
-  });
-  await expect(cardSource).toHaveAttribute(
-    "href",
-    "https://www.bancognb.com.pe/inicio/servicio-cliente/reclamaciones-consulta-24hr",
-  );
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
   await expect(
-    widget.locator(".assistant-source__category").filter({ hasText: "Tarjetas" }),
-  ).toBeVisible();
+    widget.getByRole("link", { name: "Consultas y bloqueos 24 horas" }),
+  ).toHaveCount(0);
 
   await sendMessage(page, "sigo confundido");
   await expect(
@@ -355,7 +350,7 @@ test("recorre saludo, categorías, FAQ, aclaración y nueva consulta sin perder 
   );
   await expect(clarificationChoices).toHaveCount(1);
   await expect(widget.locator(".assistant-interactive-options")).toHaveCount(0);
-  await expect(cardSource).toBeVisible();
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
   await expect(
     widget.locator(".assistant-response-status").filter({
       hasText: "Respuesta generada con IA.",
@@ -367,7 +362,7 @@ test("recorre saludo, categorías, FAQ, aclaración y nueva consulta sin perder 
     widget.getByText("Claro. ¿Sobre qué tema quieres consultar ahora?"),
   ).toBeVisible();
   await expect(widget.getByText("hola", { exact: true })).toBeVisible();
-  await expect(cardSource).toBeVisible();
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
   await expect(widget.locator(".assistant-interactive-options")).toHaveCount(1);
 
   await sendMessage(page, "2+2");
@@ -405,7 +400,7 @@ test("ayuda con tarjetas muestra preguntas de esa categoría devueltas por el ba
       ui: cardFaqChoices,
     }),
   );
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
 
   await sendMessage(page, "Quiero ayuda con tarjetas");
 
@@ -455,7 +450,7 @@ test("una consulta fuera de alcance muestra la respuesta y las categorías dispo
       },
     }),
   );
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
 
   await sendMessage(page, "2+2");
 
@@ -469,21 +464,23 @@ test("una consulta fuera de alcance muestra la respuesta y las categorías dispo
   await expect(widget.getByRole("alert")).toHaveCount(0);
 });
 
-test("la fuente de recuperación de contraseña conserva el enlace oficial devuelto", async ({
+test("sustituye contenido GNB heredado y no muestra sus fuentes", async ({
   page,
 }) => {
   const sentBodies = await openPublicAssistant(page, (body, index) => {
     if (body.option_id === `faq:${passwordFaqId}`) {
-      return reply(index, "Sigue los pasos de la guía oficial para recuperar tu clave.", {
+      const oldAnswer =
+        "Banco GNB permite recuperar la contraseña desde su banca móvil.";
+      return reply(index, oldAnswer, {
         bot_message: message(
           `bot-${index}`,
           "BOT",
-          "Sigue los pasos de la guía oficial para recuperar tu clave.",
+          oldAnswer,
         ),
         response_source: "AI",
         sources: [
           {
-            title: "Guía oficial de cambio de contraseña",
+            title: "Información de acceso de Banco GNB",
             category: "BANCA_DIGITAL",
             url: recoveryGuideUrl,
             verified_at: "2026-11-15T00:00:00Z",
@@ -512,7 +509,7 @@ test("la fuente de recuperación de contraseña conserva el enlace oficial devue
       },
     });
   });
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
 
   await expect(widget.locator('input[type="password"]')).toHaveCount(0);
 
@@ -522,15 +519,13 @@ test("la fuente de recuperación de contraseña conserva el enlace oficial devue
       name: "¿Qué hago si olvidé mi contraseña de Banca Móvil?",
     })
     .click();
+  await expect(widget.getByText(safeFaqFallback, { exact: true })).toBeVisible();
   await expect(
-    widget.getByText("Sigue los pasos de la guía oficial para recuperar tu clave."),
-  ).toBeVisible();
-  await widget.locator(".assistant-sources > summary").click();
-  await expect(
-    widget.getByRole("link", {
-      name: "Guía oficial de cambio de contraseña",
-    }),
-  ).toHaveAttribute("href", recoveryGuideUrl);
+    widget.getByText("Banco GNB permite recuperar la contraseña desde su banca móvil."),
+  ).toHaveCount(0);
+  await expect(widget.getByText("Respuesta generada con IA.")).toHaveCount(0);
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
+  await expect(widget.locator('a[href*="bancognb.com.pe"]')).toHaveCount(0);
   expect(sentBodies).toEqual([
     { content: "Olvidé mi contraseña" },
     { option_id: `faq:${passwordFaqId}` },

@@ -296,4 +296,63 @@ describe("AssistantConversation", () => {
     expect(document.body).not.toHaveTextContent(internalId);
     expect(document.body).toHaveTextContent("[identificador oculto]");
   });
+
+  it("replaces stale institution-specific replies and hides their sources", async () => {
+    const user = userEvent.setup();
+    const oldAnswer = "Banco GNB publica condiciones específicas para sus cuentas.";
+    const safeAnswer =
+      "No tengo información verificada para responder esta consulta financiera. Puedo orientarte de forma general o ayudarte a registrar un ticket.";
+    vi.spyOn(api.chat, "create").mockResolvedValue(
+      conversation("conversation-stale-faq"),
+    );
+    vi.spyOn(api.chat, "message").mockResolvedValue(
+      reply(oldAnswer, {
+        response_source: "AI",
+        sources: [
+          {
+            title: "Información de cuentas",
+            category: "Cuentas",
+            url: "https://www.bancognb.com.pe/cuentas",
+            verified_at: "2026-11-01T00:00:00Z",
+          },
+        ],
+      }),
+    );
+
+    renderAssistant();
+    await user.type(
+      screen.getByRole("textbox", { name: "Escribe tu consulta" }),
+      "¿Qué condiciones tiene una cuenta?{Enter}",
+    );
+
+    expect(await screen.findByText(safeAnswer)).toBeVisible();
+    expect(screen.queryByText(oldAnswer)).toBeNull();
+    expect(screen.queryByText("Respuesta generada con IA.")).toBeNull();
+    expect(screen.queryByText("Ver fuente")).toBeNull();
+    expect(document.querySelectorAll('a[href*="bancognb.com.pe"]')).toHaveLength(0);
+  });
+
+  it("applies the same neutral fallback to restored history", async () => {
+    const conversationId = "conversation-stale-history";
+    const oldAnswer = "Banco GNB ofrece información de productos y tarifas.";
+    const safeAnswer =
+      "No tengo información verificada para responder esta consulta financiera. Puedo orientarte de forma general o ayudarte a registrar un ticket.";
+    window.sessionStorage.setItem("gnb.chat.conversation.v1", conversationId);
+    vi.spyOn(api.chat, "get").mockResolvedValue({
+      ...conversation(conversationId),
+      turn_count: 1,
+      messages: [
+        {
+          ...chatMessage("old-bot-message", "BOT", oldAnswer),
+          response_source: "AI",
+        },
+      ],
+    });
+
+    renderAssistant();
+
+    expect(await screen.findByText(safeAnswer)).toBeVisible();
+    expect(screen.queryByText(oldAnswer)).toBeNull();
+    expect(screen.queryByText("Respuesta generada con IA.")).toBeNull();
+  });
 });

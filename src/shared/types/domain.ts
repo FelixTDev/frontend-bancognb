@@ -112,6 +112,8 @@ export interface Faq {
   readonly status: string;
   readonly is_active: boolean;
   readonly version: number;
+  readonly source_url?: string | null;
+  readonly source_verified_at?: string | null;
 }
 
 export interface PageResult<T> {

@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "./fixtures";
 
 const password = "demo-password-local";
+const academicDisclaimer =
+  "Proyecto académico — no oficial ni afiliado a ninguna entidad financiera.";
 
 async function login(page: Page, email: string) {
   await page.goto("/ingresar");
@@ -19,7 +21,7 @@ test("la portada presenta el servicio y navega por contenido público", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page).toHaveTitle(/Banco GNB/);
+  await expect(page).toHaveTitle("Banco - Atención de Tickets");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
     "acompañada",
   );
@@ -33,16 +35,119 @@ test("la portada presenta el servicio y navega por contenido público", async ({
   );
 });
 
+test("la identidad académica y el aviso se leen en la portada y el asistente", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("link", { name: "Banco - Atención de Tickets, inicio" }).first(),
+  ).toBeVisible();
+  await expect(page.getByText(academicDisclaimer, { exact: true }).first()).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(/GNB|bancognb\.com\.pe/i);
+
+  await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
+  await expect(widget.getByText(academicDisclaimer, { exact: true })).toBeVisible();
+  await expect(widget).not.toContainText(/GNB|bancognb\.com\.pe/i);
+
+  const notice = widget.getByText(academicDisclaimer, { exact: true });
+  const fontSize = await notice.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  expect(fontSize).toBeGreaterThanOrEqual(12);
+});
+
+test("la FAQ conserva sus categorías publicadas", async ({ page }) => {
+  const categories = [
+    "TARJETAS",
+    "CUENTAS",
+    "CREDITOS",
+    "BANCA_DIGITAL",
+    "RECLAMOS_SIMPLES",
+    "SOLICITUDES_INFORMACION",
+  ].map((name, index) => ({
+    id: `category-${index}`,
+    name,
+    description: "Categoría de orientación.",
+    is_active: true,
+  }));
+  await page.route("**/api/v1/categories", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(categories),
+    }),
+  );
+  await page.route("**/api/v1/faqs**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "faq-accounts",
+            category_id: "category-1",
+            title: "¿Qué tipos de cuentas ofrece Banco GNB?",
+            question: "¿Qué tipos de cuentas ofrece Banco GNB?",
+            answer: "Banco GNB ofrece varios productos con condiciones propias.",
+            summary: "Respuesta bancaria heredada.",
+            tags: ["cuentas"],
+            status: "PUBLISHED",
+            is_active: true,
+            version: 1,
+            source_url: "https://www.bancognb.com.pe/cuentas",
+          },
+        ],
+        total: 19,
+        page: 1,
+        page_size: 100,
+        total_pages: 1,
+      }),
+    }),
+  );
+
+  await page.goto("/preguntas-frecuentes");
+
+  const categoryGroup = page.getByRole("group", { name: "Filtrar por categoría" });
+  for (const label of [
+    "Tarjetas",
+    "Cuentas",
+    "Créditos",
+    "Banca digital",
+    "Reclamos simples",
+    "Solicitudes de información",
+  ]) {
+    await expect(categoryGroup.getByRole("button", { name: label })).toBeVisible();
+  }
+  await expect(page.getByText("19 preguntas")).toBeVisible();
+  const legacyFaq = page
+    .locator(".faq-list details")
+    .filter({ hasText: "¿Qué tipos de cuentas ofrece una entidad financiera?" });
+  await legacyFaq.locator("summary").click();
+  await expect(
+    legacyFaq.getByText("¿Qué tipos de cuentas ofrece una entidad financiera?"),
+  ).toBeVisible();
+  await expect(
+    legacyFaq.getByText(
+      "No tengo información verificada para responder esta consulta financiera.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(/GNB|bancognb\.com\.pe/i);
+  await expect(page.locator('a[href*="bancognb.com.pe"]')).toHaveCount(0);
+});
+
 test("el widget anónimo existe solo en Landing y restaura el foco con Escape", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  const launcher = page.getByRole("button", { name: "Abrir Asistente GNB" });
+  const launcher = page.getByRole("button", { name: "Abrir asistente de atención" });
   await expect(launcher).toBeVisible();
   await launcher.click();
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await expect(widget).toBeVisible();
   await expect(
     widget.getByRole("button", { name: "Cerrar asistente" }),
@@ -65,6 +170,7 @@ test("el widget anónimo existe solo en Landing y restaura el foco con Escape", 
   await expect(
     widget.getByText("No compartas contraseñas ni códigos de seguridad."),
   ).toBeVisible();
+  await expect(widget.getByText(academicDisclaimer, { exact: true })).toBeVisible();
   await expect(
     widget.getByRole("textbox", { name: "Escribe tu consulta" }),
   ).toBeVisible();
@@ -82,11 +188,11 @@ test("el widget anónimo existe solo en Landing y restaura el foco con Escape", 
 
   await page.goto("/ingresar");
   await expect(
-    page.getByRole("button", { name: "Abrir Asistente GNB" }),
+    page.getByRole("button", { name: "Abrir asistente de atención" }),
   ).toHaveCount(0);
   await page.goto("/registro");
   await expect(
-    page.getByRole("button", { name: "Abrir Asistente GNB" }),
+    page.getByRole("button", { name: "Abrir asistente de atención" }),
   ).toHaveCount(0);
 });
 
@@ -178,8 +284,8 @@ test("el asistente respeta saludo, consulta, aclaración y acciones habilitadas 
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   const composer = widget.getByRole("textbox", { name: "Escribe tu consulta" });
   const send = widget.getByRole("button", { name: "Enviar consulta" });
 
@@ -292,8 +398,8 @@ test("el widget representa 429, reintento, aclaración y autenticación para con
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await widget
     .getByRole("textbox", { name: "Escribe tu consulta" })
     .fill("Necesito orientación");
@@ -319,7 +425,7 @@ test("el widget representa 429, reintento, aclaración y autenticación para con
   await expect(widget.getByText("request-service-error")).toBeVisible();
 });
 
-test("nosotros presenta la historia institucional y sus canales de atención", async ({
+test("Sobre el proyecto explica el prototipo y conserva el alias nosotros", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -328,24 +434,26 @@ test("nosotros presenta la historia institucional y sus canales de atención", a
   });
 
   await page.goto("/nosotros");
+  await expect(page).toHaveURL(/\/sobre-el-proyecto$/);
 
   const about = page.locator(".about-page");
   await expect(
     about.getByRole("heading", {
       level: 1,
-      name: "Una historia de confianza que sigue avanzando",
+      name: "Sobre el proyecto",
     }),
   ).toBeVisible();
   for (const heading of [
-    "Quiénes somos",
-    "Presencia que conecta",
-    "Banca Personal",
-    "Banca Empresarial",
-    "Atención humana y calificada",
-    "Juntos llegamos más lejos",
+    "Un prototipo académico de atención digital",
+    "Orientación para cada consulta",
+    "Seguimiento de tickets",
+    "Cómo funciona el recorrido",
+    "Explora el prototipo",
   ]) {
     await expect(about.getByRole("heading", { name: heading })).toBeVisible();
   }
+  await expect(page.getByText(academicDisclaimer, { exact: true })).toBeVisible();
+  await expect(about).not.toContainText(/GNB|bancognb\.com\.pe/i);
 
   const images = about.locator("img");
   await expect(images).toHaveCount(4);
@@ -395,6 +503,17 @@ test("cliente inicia sesión, consulta solicitudes y no entra a supervisión", a
 }, testInfo) => {
   await login(page, "cliente@demo.com");
   await expect(page).toHaveURL(/\/app\/inicio$/);
+  await expect(
+    page
+      .locator(".app-header")
+      .getByRole("link", { name: "Banco - Atención de Tickets, inicio" }),
+  ).toBeVisible();
+  const appDisclaimer = page.getByText(academicDisclaimer, { exact: true });
+  await expect(appDisclaimer).toBeVisible();
+  const disclaimerFontSize = await appDisclaimer.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  expect(disclaimerFontSize).toBeGreaterThanOrEqual(12);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Hola");
   await openAppNavigation(page, testInfo.project.name);
   await page
@@ -413,6 +532,11 @@ test("cliente inicia sesión, consulta solicitudes y no entra a supervisión", a
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       "Asistente digital",
     );
+    await expect(
+      page
+        .locator(".assistant-panel")
+        .getByText(academicDisclaimer, { exact: true }),
+    ).toBeVisible();
   }
   await page.goto("/supervisor/operacion");
   await expect(page).toHaveURL(/\/sin-acceso$/);

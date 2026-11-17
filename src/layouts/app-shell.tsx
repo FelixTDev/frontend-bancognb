@@ -20,9 +20,10 @@ import {
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/auth-context";
 import { api } from "../shared/api/endpoints";
+import { AcademicDisclaimer } from "../shared/components/academic-disclaimer";
 import { BrandMark } from "../shared/components/brand-mark";
 import type { UserRole } from "../shared/types/domain";
 
@@ -63,6 +64,7 @@ const navByRole: Record<UserRole, readonly NavItem[]> = {
 };
 
 export function AppShell() {
+  const location = useLocation();
   const { session, logout } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -178,6 +180,7 @@ export function AppShell() {
       </aside>
       <div className="app-shell__body">
         <header className="app-header">
+          <BrandMark compact />
           <button
             ref={menuButtonRef}
             className="app-header__menu"
@@ -282,6 +285,7 @@ export function AppShell() {
             </div>
           </div>
         </header>
+        {location.pathname === "/app/asistente" ? null : <AcademicDisclaimer />}
         <main id="app-content" className="app-content">
           <Outlet />
         </main>

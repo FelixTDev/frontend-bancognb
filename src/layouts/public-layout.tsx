@@ -2,6 +2,7 @@ import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { PublicAssistantWidget } from "../features/chat/public-assistant-widget";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { AcademicDisclaimer } from "../shared/components/academic-disclaimer";
 import { BrandMark } from "../shared/components/brand-mark";
 import { ButtonLink } from "../shared/components/ui";
 
@@ -9,7 +10,7 @@ const links = [
   { to: "/", label: "Inicio", end: true },
   { to: "/como-funciona", label: "Cómo funciona" },
   { to: "/preguntas-frecuentes", label: "Preguntas frecuentes" },
-  { to: "/nosotros", label: "Nosotros" },
+  { to: "/sobre-el-proyecto", label: "Sobre el proyecto" },
   { to: "/ayuda", label: "Ayuda" },
 ];
 
@@ -64,6 +65,7 @@ export function PublicLayout() {
           </nav>
         </div>
       </header>
+      <AcademicDisclaimer />
       <main id="contenido-principal">
         <Outlet />
       </main>
@@ -79,8 +81,8 @@ function Footer() {
       <div className="footer__main">
         <BrandMark inverse />
         <p>
-          Un canal claro para registrar, seguir y resolver tus solicitudes con
-          trazabilidad.
+          Una experiencia académica para explorar el registro, seguimiento y
+          resolución de solicitudes.
         </p>
         <div className="footer__columns">
           <div>
@@ -89,8 +91,8 @@ function Footer() {
             <NavLink to="/preguntas-frecuentes">Preguntas frecuentes</NavLink>
           </div>
           <div>
-            <strong>Institucional</strong>
-            <NavLink to="/nosotros">Nosotros</NavLink>
+            <strong>El proyecto</strong>
+            <NavLink to="/sobre-el-proyecto">Sobre el proyecto</NavLink>
             <NavLink to="/ayuda">Ayuda y contacto</NavLink>
           </div>
           <div>
@@ -101,8 +103,8 @@ function Footer() {
         </div>
       </div>
       <div className="footer__bottom">
-        <span>Banco GNB Perú</span>
-        <span>Atención Digital</span>
+        <span>Banco - Atención de Tickets</span>
+        <span>Prototipo académico</span>
       </div>
     </footer>
   );

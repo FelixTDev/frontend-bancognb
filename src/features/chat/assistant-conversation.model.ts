@@ -1,12 +1,18 @@
 import type {
   BotMessageResponse,
   ChatbotQuickReply,
+  ChatbotSource,
   ChatbotUIOption,
   ChatbotTicketDraft,
   ChatbotTicketDraftField,
   TicketCreateInput,
 } from "../../shared/api/endpoints";
 import { ticketPriorityLabels } from "../../shared/ticket-labels";
+import {
+  containsRemovedInstitutionReference,
+  getSafeFaqContent,
+  safeUnverifiedFaqAnswer,
+} from "../../shared/faq-content";
 
 export type ReadyTicketDraftPayload = Pick<
   TicketCreateInput,
@@ -157,9 +163,10 @@ const assistantOptionCategoryLabels: Record<string, string> = {
 
 /** Presents category keys as title-cased labels in interactive choices. */
 export function formatAssistantOptionLabel(label: string): string {
+  const safeLabel = getSafeFaqContent({ question: label, answer: "" }).question;
   return (
-    assistantOptionCategoryLabels[label.trim().toLocaleUpperCase("es-PE")] ??
-    label
+    assistantOptionCategoryLabels[safeLabel.trim().toLocaleUpperCase("es-PE")] ??
+    safeLabel
   );
 }
 
@@ -325,25 +332,29 @@ export function getAssistantResponseStatus(reply: {
   return reply.response_source === "AI" ? "ai" : null;
 }
 
-export function getSafeAssistantSourceUrl(
-  value: string | null | undefined,
-): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol !== "https:" ||
-      !["bancognb.com.pe", "www.bancognb.com.pe"].includes(url.hostname) ||
-      url.username ||
-      url.password ||
-      url.port
-    ) {
-      return null;
-    }
-    return url.href;
-  } catch {
-    return null;
-  }
+export interface SafeAssistantContent {
+  readonly content: string;
+  readonly isGenericFallback: boolean;
+}
+
+const safeAssistantFallback = `${safeUnverifiedFaqAnswer} Puedo orientarte de forma general o ayudarte a registrar un ticket.`;
+
+export function getSafeAssistantContent(
+  content: string,
+  sources: readonly ChatbotSource[] = [],
+): SafeAssistantContent {
+  const containsRemovedContent =
+    containsRemovedInstitutionReference(content) ||
+    sources.some((source) =>
+      containsRemovedInstitutionReference(
+        [source.title, source.category, source.url].filter(Boolean).join(" "),
+      ),
+    );
+
+  return {
+    content: containsRemovedContent ? safeAssistantFallback : content,
+    isGenericFallback: containsRemovedContent,
+  };
 }
 
 export function getAssistantTicketQueryPresentation(

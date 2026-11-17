@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/endpoints";
+import { getSafeFaqContent } from "../faq-content";
 import type { Category, Faq, PageResult } from "../types/domain";
 import { PaginationControls, Skeleton, StatePanel } from "./ui";
 
@@ -33,7 +34,17 @@ const pageCount = (
     ? (data.total_pages ?? data.pages ?? Math.ceil(total / data.page_size))
     : 1;
 
+const knownCategoryLabels: Readonly<Record<string, string>> = {
+  TARJETAS: "Tarjetas",
+  CUENTAS: "Cuentas",
+  CREDITOS: "Créditos",
+  BANCA_DIGITAL: "Banca digital",
+  RECLAMOS_SIMPLES: "Reclamos simples",
+  SOLICITUDES_INFORMACION: "Solicitudes de información",
+};
+
 const categoryLabel = (category: Category) =>
+  knownCategoryLabels[category.name] ??
   category.name
     .replace(/[_-]+/g, " ")
     .toLocaleLowerCase("es-PE")
@@ -141,18 +152,21 @@ export function FaqLibrary({
             {total === 1 ? "1 pregunta" : `${total} preguntas`}
           </div>
           <div className="faq-list">
-            {faqs.map((faq) => (
-              <details key={faq.id} name="faq-items">
-                <summary>
-                  <span className="faq-browser__question">
-                    <CircleHelp aria-hidden="true" />
-                    <span>{faq.question}</span>
-                  </span>
-                  <ChevronDown aria-hidden="true" />
-                </summary>
-                <p>{faq.answer}</p>
-              </details>
-            ))}
+            {faqs.map((faq) => {
+              const content = getSafeFaqContent(faq);
+              return (
+                <details key={faq.id} name="faq-items">
+                  <summary>
+                    <span className="faq-browser__question">
+                      <CircleHelp aria-hidden="true" />
+                      <span>{content.question}</span>
+                    </span>
+                    <ChevronDown aria-hidden="true" />
+                  </summary>
+                  <p>{content.answer}</p>
+                </details>
+              );
+            })}
           </div>
           {pages > 1 ? (
             <PaginationControls

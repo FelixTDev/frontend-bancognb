@@ -11,7 +11,6 @@ import {
   FileText,
   Headphones,
   LockKeyhole,
-  MapPin,
   MessagesSquare,
   Search,
   Send,
@@ -24,6 +23,7 @@ import "./help.css";
 import "./how-it-works.css";
 import { requestOpenPublicAssistant } from "../features/chat/public-assistant-widget";
 import { api } from "../shared/api/endpoints";
+import { getSafeFaqContent } from "../shared/faq-content";
 import {
   Button,
   ButtonLink,
@@ -233,15 +233,18 @@ export function HomePage() {
           />
         ) : (
           <div className="faq-list">
-            {faqs.map((faq) => (
-              <details key={faq.id}>
-                <summary>
-                  {faq.question}
-                  <ChevronDown aria-hidden="true" />
-                </summary>
-                <p>{faq.answer}</p>
-              </details>
-            ))}
+              {faqs.map((faq) => {
+                const content = getSafeFaqContent(faq);
+                return (
+                  <details key={faq.id}>
+                    <summary>
+                      {content.question}
+                      <ChevronDown aria-hidden="true" />
+                    </summary>
+                    <p>{content.answer}</p>
+                  </details>
+                );
+              })}
           </div>
         )}
       </section>
@@ -560,22 +563,20 @@ export function PublicFaqPage() {
 
 export function AboutPage() {
   return (
-    <main className="about-page">
+    <div className="about-page">
       <section className="about-hero" aria-labelledby="about-title">
         <ResponsiveImage
           name="human-support"
-          alt="Asesor orientando a una persona en un espacio de atención reservado"
+          alt="Dos personas conversan en un espacio de atención"
           className="about-hero__media"
         />
         <div className="about-hero__shade" />
         <div className="about-hero__content">
-          <p className="about-eyebrow">Banco GNB Perú</p>
-          <h1 id="about-title">
-            Una historia de confianza que sigue avanzando
-          </h1>
+          <p className="about-eyebrow">Acerca de esta experiencia</p>
+          <h1 id="about-title">Sobre el proyecto</h1>
           <p className="about-hero__intro">
-            Respaldo regional y atención cercana para acompañar a personas y
-            empresas en el Perú.
+            Una demostración académica de cómo podría organizarse la atención y
+            el seguimiento de solicitudes en un canal digital.
           </p>
           <div className="about-actions">
             <ButtonLink to="/registro">Crear una solicitud</ButtonLink>
@@ -584,133 +585,89 @@ export function AboutPage() {
             </ButtonLink>
           </div>
           <p className="about-hero__note">
-            Atención personalizada y calificada
+            Un recorrido visual de una propuesta académica.
           </p>
         </div>
       </section>
 
       <Reveal className="about-intro">
         <div className="about-heading">
-          <p className="about-eyebrow">Nuestra identidad</p>
-          <h2>Quiénes somos</h2>
+          <p className="about-eyebrow">Propósito</p>
+          <h2>Un prototipo académico de atención digital</h2>
         </div>
         <div className="about-intro__copy">
           <p>
-            Banco GNB Perú forma parte del grupo Banco GNB Sudameris S.A. y
-            opera en el país desde octubre de 2013.
+            El proyecto permite recorrer una experiencia de orientación,
+            registro y seguimiento de tickets con contenido de demostración.
           </p>
           <p>
-            La presencia del grupo en el Perú y Latinoamérica se sostiene en una
-            trayectoria de más de 100 años en el mercado financiero colombiano.
+            Sus pantallas sirven para explorar flujos de atención y no representan
+            productos ni canales de una institución financiera.
           </p>
         </div>
       </Reveal>
 
       <Reveal className="about-history">
         <div className="about-heading about-heading--inverse">
-          <p className="about-eyebrow">Trayectoria</p>
-          <h2>Hitos que dan contexto a nuestro presente</h2>
+          <p className="about-eyebrow">Recorrido de demostración</p>
+          <h2>Cómo funciona el recorrido</h2>
         </div>
         <ol className="about-history__timeline">
           <li>
-            <strong>Más de 100 años</strong>
-            <span>de trayectoria del grupo en Colombia</span>
+            <strong>01 · Orientación</strong>
+            <span>Explora preguntas frecuentes o temas de ayuda.</span>
           </li>
           <li>
-            <strong>Octubre de 2013</strong>
-            <span>inicio de operaciones en el Perú</span>
+            <strong>02 · Registro</strong>
+            <span>Revisa el flujo de creación de una solicitud de prueba.</span>
           </li>
           <li>
-            <strong>10 agencias</strong>
-            <span>como parte de la presencia nacional</span>
+            <strong>03 · Seguimiento</strong>
+            <span>Consulta estados y conversaciones de ejemplo.</span>
           </li>
           <li>
-            <strong>Más de 500</strong>
-            <span>colaboradores en Banco GNB Perú</span>
+            <strong>04 · Aprendizaje</strong>
+            <span>Observa cómo se organiza el contexto de atención.</span>
           </li>
         </ol>
       </Reveal>
 
-      <Reveal className="about-presence">
-        <div
-          className="about-presence__visual"
-          role="group"
-          aria-label="Distribución de las diez agencias"
-        >
-          <div className="about-presence__visual-heading">
-            <MapPin aria-hidden="true" />
-            <span>Presencia nacional</span>
-          </div>
-          <div className="about-presence__total">
-            <strong>10</strong>
-            <span>agencias</span>
-          </div>
-          <div className="about-presence__distribution">
-            <div>
-              <span>Lima</span>
-              <strong>6</strong>
-              <span className="about-presence__bar" aria-hidden="true">
-                <span style={{ width: "60%" }} />
-              </span>
-            </div>
-            <div>
-              <span>Provincias</span>
-              <strong>4</strong>
-              <span className="about-presence__bar" aria-hidden="true">
-                <span style={{ width: "40%" }} />
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="about-presence__content">
-          <p className="about-eyebrow">Cobertura</p>
-          <h2>Presencia que conecta</h2>
-          <p>
-            La red de Banco GNB Perú acerca la atención a personas y empresas
-            en Lima y otras regiones del país.
-          </p>
-          <p className="about-presence__note">
-            Atención para los segmentos de Banca Personal y Banca Empresarial.
-          </p>
-        </div>
-      </Reveal>
-
       <section
         className="about-segments"
-        aria-labelledby="about-segments-title"
+        aria-label="Funciones demostradas"
       >
         <div className="about-segments__heading">
-          <p className="about-eyebrow">A quiénes acompañamos</p>
-          <h2 id="about-segments-title">Dos segmentos, una atención cercana</h2>
+          <p className="about-eyebrow">Funciones</p>
+          <h2>Explora las partes principales del prototipo</h2>
         </div>
         <div className="about-segments__stories">
           <Reveal className="about-segment about-segment--personal">
             <ResponsiveImage
               name="personal-banking"
-              alt="Asesora conversando con un cliente en un espacio de atención cercano"
+              alt="Una persona consulta información en una pantalla"
               className="about-segment__media"
             />
             <div className="about-segment__copy">
               <span aria-hidden="true">01</span>
-              <h3>Banca Personal</h3>
+              <h3>Orientación para cada consulta</h3>
               <p>
-                Atención personalizada para personas, con orientación clara y un
-                servicio calificado.
+                Revisa temas y preguntas de ejemplo; el contenido financiero no
+                sustituye información verificada de una entidad.
               </p>
             </div>
           </Reveal>
           <Reveal className="about-segment about-segment--business">
             <ResponsiveImage
               name="business-banking"
-              alt="Equipo empresarial reunido alrededor de una mesa de trabajo"
+              alt="Un equipo revisa información en una mesa de trabajo"
               className="about-segment__media"
             />
             <div className="about-segment__copy">
               <span aria-hidden="true">02</span>
-              <h3>Banca Empresarial</h3>
+              <h3>Seguimiento de tickets</h3>
               <p>
-                Acompañamiento para empresas, respaldado por la experiencia y la
-                presencia regional del grupo.
+                Explora el historial, los estados y las opciones que ofrece el
+                flujo de solicitudes de demostración.
               </p>
             </div>
           </Reveal>
@@ -719,33 +676,32 @@ export function AboutPage() {
 
       <Reveal className="about-service">
         <div className="about-service__content">
-          <p className="about-eyebrow">Nuestro canal digital</p>
-          <h2>Atención humana y calificada</h2>
+          <p className="about-eyebrow">Alcance</p>
+          <h2>Explora el prototipo</h2>
           <p>
-            En este portal, la cercanía se traduce en una experiencia simple
-            para registrar solicitudes, seguir cada avance y mantener la
-            conversación en un solo lugar.
+            Navega por las preguntas frecuentes, el recorrido de ayuda y las
+            pantallas de tickets para conocer la propuesta académica.
           </p>
           <ul>
-            <li>Registro claro de cada solicitud</li>
-            <li>Seguimiento visible del proceso</li>
-            <li>Conversaciones que conservan su contexto</li>
+            <li>Orientación mediante preguntas de ejemplo</li>
+            <li>Registro y seguimiento dentro de la demostración</li>
+            <li>Diseño de conversación con contexto</li>
           </ul>
         </div>
         <ResponsiveImage
-          name="human-support"
-          alt="Asesor orientando a una persona en un espacio de atención reservado"
+          name="service-architecture"
+          alt="Diagrama abstracto de un recorrido digital"
           className="about-service__media"
         />
       </Reveal>
 
       <Reveal className="about-closing">
         <div>
-          <p className="about-eyebrow">Banco GNB Perú</p>
-          <h2>Juntos llegamos más lejos</h2>
+          <p className="about-eyebrow">Prueba de navegación</p>
+          <h2>Continúa explorando</h2>
           <p>
-            Encuentra orientación o inicia una solicitud desde este canal de
-            atención digital.
+            Este prototipo presenta un recorrido académico y no representa un
+            canal oficial de una entidad financiera.
           </p>
         </div>
         <div className="about-actions">
@@ -755,7 +711,7 @@ export function AboutPage() {
           </ButtonLink>
         </div>
       </Reveal>
-    </main>
+    </div>
   );
 }
 

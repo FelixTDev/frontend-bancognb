@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { lazy, type ComponentType } from "react";
 import { AppShell } from "../layouts/app-shell";
 import { PublicLayout } from "../layouts/public-layout";
@@ -73,7 +73,11 @@ export const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: "como-funciona", element: <HowItWorksPage /> },
       { path: "preguntas-frecuentes", element: <PublicFaqPage /> },
-      { path: "nosotros", element: <AboutPage /> },
+      { path: "sobre-el-proyecto", element: <AboutPage /> },
+      {
+        path: "nosotros",
+        element: <Navigate to="/sobre-el-proyecto" replace />,
+      },
       { path: "ayuda", element: <HelpPage /> },
       { path: "privacidad", element: <LegalPage type="privacy" /> },
       { path: "terminos", element: <LegalPage type="terms" /> },

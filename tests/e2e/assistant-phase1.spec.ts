@@ -138,7 +138,7 @@ async function openAssistant(page: Page, authenticated = true) {
   const unhandledMutations = await installApiGuard(page, { authenticated });
   await page.goto(authenticated ? "/app/asistente" : "/");
   if (!authenticated) {
-    await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+    await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
   }
   return unhandledMutations;
 }
@@ -242,7 +242,7 @@ test("combina las opciones de aclaración, conserva el option_id y oculta el fee
             {
               title: "Banca por Internet",
               category: "Cuentas",
-              url: "https://www.bancognb.com.pe/inicio/banca-personas/cuentas",
+              url: "https://example.test/cuentas",
               verified_at: "2026-11-01T00:00:00Z",
             },
           ],
@@ -251,7 +251,7 @@ test("combina las opciones de aclaración, conserva el option_id y oculta el fee
     },
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "Necesito consultar mi cuenta");
 
   const clarification = widget.locator(".assistant-clarification");
@@ -294,13 +294,8 @@ test("combina las opciones de aclaración, conserva el option_id y oculta el fee
     { option_id: "faq:balance" },
   ]);
   await expect(widget.getByText("¿Te ayudó esta respuesta?")).toHaveCount(0);
-  await widget.locator(".assistant-sources > summary").click();
-  await expect(
-    widget.getByRole("link", { name: "Banca por Internet" }),
-  ).toHaveAttribute(
-    "href",
-    "https://www.bancognb.com.pe/inicio/banca-personas/cuentas",
-  );
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
+  await expect(widget.getByRole("link", { name: "Banca por Internet" })).toHaveCount(0);
   expect(unhandled).toEqual([]);
 });
 
@@ -334,7 +329,7 @@ test("mantiene las opciones antiguas de aclaración que solo incluyen texto", as
     },
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "Quiero saber de mi cuenta");
   const clarification = widget.locator(".assistant-clarification");
   const choices = clarification.locator(".assistant-clarification__choices");
@@ -348,7 +343,7 @@ test("mantiene las opciones antiguas de aclaración que solo incluyen texto", as
   expect(unhandled).toEqual([]);
 });
 
-test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", async ({
+test("muestra sugerencias y aclaraciones sin exponer metadatos de fuentes", async ({
   page,
 }) => {
   const unhandled = await openAssistant(page, false);
@@ -363,7 +358,7 @@ test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", a
           {
             title: "Canales digitales",
             category: "Banca digital",
-            url: "https://www.bancognb.com.pe/inicio/canales/canales-digitales",
+            url: "https://example.test/canales",
             verified_at: "2026-10-05T00:00:00Z",
           },
           {
@@ -387,26 +382,13 @@ test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", a
     });
   });
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "Quiero consultar un tema sin usar las preguntas sugeridas");
   await expect(widget.getByRole("button", { name: "Consultar un saldo" })).toBeVisible();
-  const sourcesDisclosure = widget.locator(".assistant-sources > summary");
-  await expect(sourcesDisclosure).toBeVisible();
-  await sourcesDisclosure.click();
-  const sourceLink = widget.getByRole("link", { name: "Canales digitales" });
-  await expect(sourceLink).toHaveAttribute(
-    "href",
-    "https://www.bancognb.com.pe/inicio/canales/canales-digitales",
-  );
-  await expect(sourceLink).toHaveAttribute("rel", /noopener/);
-  await expect(
-    widget.getByText(
-      "https://www.bancognb.com.pe/inicio/canales/canales-digitales",
-    ),
-  ).toBeVisible();
-  await expect(widget.getByText(/verificada/i)).toBeVisible();
-  await expect(widget.getByText("Fuente no segura")).toBeVisible();
-  await expect(widget.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
+  await expect(widget.getByText("Canales digitales")).toHaveCount(0);
+  await expect(widget.getByText("Fuente no segura")).toHaveCount(0);
+  await expect(widget.getByText("Ver fuente")).toHaveCount(0);
 
   await sendMessage(page, "Mi siguiente pregunta es libre");
   await expect(widget.getByText("Si quieres, puedo crear un ticket.")).toBeVisible();
@@ -419,7 +401,7 @@ test("muestra sugerencias, aclaraciones y fuentes desde campos estructurados", a
   expect(unhandled).toEqual([]);
 });
 
-test("muestra una respuesta de IA aceptada con su fuente verificada", async ({
+test("muestra una respuesta de IA aceptada sin presentar tarjetas de fuentes", async ({
   page,
 }) => {
   await openAssistant(page, false);
@@ -436,14 +418,14 @@ test("muestra una respuesta de IA aceptada con su fuente verificada", async ({
         {
           title: "Compras por internet en tarjetas",
           category: "Tarjetas",
-          url: "https://www.bancognb.com.pe/inicio/banca-personas/tarjetas",
+          url: "https://example.test/tarjetas",
           verified_at: "2026-11-01T00:00:00Z",
         },
       ],
     }),
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "¿Cómo configuro compras por internet?");
   await expect.poll(sent).toBe(1);
 
@@ -455,14 +437,10 @@ test("muestra una respuesta de IA aceptada con su fuente verificada", async ({
   await expect(widget.getByRole("status")).toHaveText(
     "Respuesta generada con IA.",
   );
-  await widget.locator(".assistant-sources > summary").click();
+  await expect(widget.locator(".assistant-sources")).toHaveCount(0);
   await expect(
     widget.getByRole("link", { name: "Compras por internet en tarjetas" }),
-  ).toHaveAttribute(
-    "href",
-    "https://www.bancognb.com.pe/inicio/banca-personas/tarjetas",
-  );
-  await expect(widget.getByText(/verificada/i)).toBeVisible();
+  ).toHaveCount(0);
   await expect(widget.getByText("OUT_OF_CONTEXT")).toHaveCount(0);
   await expect(widget.getByText("GENERATED")).toHaveCount(0);
 });
@@ -493,7 +471,7 @@ test("muestra el fallback sin fuentes inventadas y permite continuar consultando
         }),
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "¿Qué debería hacer?");
   await expect(
     widget.getByText(
@@ -576,7 +554,7 @@ test("muestra opciones del contrato y envía el option_id seleccionado", async (
     },
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "¿Qué consultas puedo hacer?");
   await widget
     .getByRole("button", { name: "Tarjetas", exact: true })
@@ -683,7 +661,7 @@ test("un option_id vencido recarga la conversación y pide elegir una opción vi
     },
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "Quiero consultar las FAQ");
   await widget.getByRole("button", { name: "Opción vencida" }).click();
 
@@ -734,7 +712,7 @@ test("un 409 de texto libre se muestra como conflicto sin tratarlo como opción 
     },
   );
 
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await sendMessage(page, "Quiero información sobre mi consulta");
 
   const error = widget.getByRole("alert");
@@ -785,8 +763,8 @@ test("restaura las opciones interactivas persistidas por el backend", async ({
   );
 
   await page.goto("/");
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
-  await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
+  await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
 
   await expect(
     widget.getByRole("button", { name: "Compras por internet" }),
@@ -817,7 +795,7 @@ test("solicitar contacto con asesor requiere una acción explícita", async ({
   );
 
   await sendMessage(page, "Quisiera consultar con alguien");
-  const widget = page.getByRole("dialog", { name: "Asistente GNB" });
+  const widget = page.getByRole("dialog", { name: "Asistente de atención" });
   await expect(widget.getByRole("button", { name: "Solicitar seguimiento" })).toBeVisible();
   expect(escalations).toBe(0);
 

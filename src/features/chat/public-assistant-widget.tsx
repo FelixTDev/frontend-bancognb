@@ -69,13 +69,13 @@ export function PublicAssistantWidget() {
           ref={launcherRef}
           type="button"
           className="assistant-widget__launcher"
-          aria-label="Abrir Asistente GNB"
+          aria-label="Abrir asistente de atención"
           aria-expanded={false}
           aria-controls="assistant-widget-dialog"
           onClick={() => setOpen(true)}
         >
           <MessageCircleMore aria-hidden="true" />
-          <span>Asistente GNB</span>
+          <span>Asistente de atención</span>
         </button>
       ) : null}
     </div>
@@ -97,7 +97,7 @@ function WidgetDialog({ onClose }: { readonly onClose: () => void }) {
           <Bot />
         </span>
         <div>
-          <strong id="assistant-widget-title">Asistente GNB</strong>
+          <strong id="assistant-widget-title">Asistente de atención</strong>
           <small>Orientación antes de registrarte</small>
         </div>
         <button type="button" aria-label="Cerrar asistente" onClick={onClose}>

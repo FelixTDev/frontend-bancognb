@@ -12,14 +12,14 @@ export function BrandMark({
     <Link
       className={`brand-mark${inverse ? " brand-mark--inverse" : ""}`}
       to="/"
-      aria-label="Banco GNB Atención Digital, inicio"
+      aria-label="Banco - Atención de Tickets, inicio"
     >
       <span className="brand-mark__icon">
         <Landmark aria-hidden="true" />
       </span>
       <span className="brand-mark__text">
-        <strong>Banco GNB</strong>
-        {compact ? null : <small>Atención Digital</small>}
+        <strong>Banco - Atención de Tickets</strong>
+        {compact ? null : <small>Atención digital</small>}
       </span>
     </Link>
   );

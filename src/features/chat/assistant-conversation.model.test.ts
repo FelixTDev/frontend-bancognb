@@ -10,7 +10,7 @@ import {
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
   getAssistantRequestErrorMessage,
-  getSafeAssistantSourceUrl,
+  getSafeAssistantContent,
   formatAssistantOptionLabel,
 } from "./assistant-conversation.model";
 
@@ -24,6 +24,12 @@ describe("assistant option labels", () => {
   it("leaves ordinary option labels unchanged", () => {
     const label = "¿Qué hago si olvidé mi contraseña?";
     expect(formatAssistantOptionLabel(label)).toBe(label);
+  });
+
+  it("generalizes an option label from the removed institution", () => {
+    expect(
+      formatAssistantOptionLabel("¿Qué tipos de cuentas ofrece Banco GNB?"),
+    ).toBe("¿Qué tipos de cuentas ofrece una entidad financiera?");
   });
 });
 
@@ -245,22 +251,6 @@ describe("assistant response source status", () => {
     ).toBe("ai");
   });
 
-  it("keeps the verified recovery guide URL exactly as returned by the backend", () => {
-    const recoveryGuideUrl =
-      "https://www.bancognb.com.pe/main/download?file=peru%2Fbanca_personas%2Fguia-cambio-de-contrasenia.pdf";
-
-    expect(getSafeAssistantSourceUrl(recoveryGuideUrl)).toBe(recoveryGuideUrl);
-  });
-
-  it.each([
-    "javascript:alert(1)",
-    "http://www.bancognb.com.pe/guia",
-    "https://example.com/guia",
-    "https://www.bancognb.com.pe.evil.test/guia",
-  ])("does not make an unsafe or unofficial source clickable: %s", (url) => {
-    expect(getSafeAssistantSourceUrl(url)).toBeNull();
-  });
-
   it("labels a deterministic answer with a fallback reason without exposing it", () => {
     expect(
       getAssistantResponseStatus(
@@ -278,6 +268,41 @@ describe("assistant response source status", () => {
         makeReply({ fallback_reason: null, response_source: "DETERMINISTIC" }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("safe assistant content", () => {
+  it.each([
+    {
+      content: "Banco GNB ofrece una tarjeta con condiciones específicas.",
+      sources: [],
+    },
+    {
+      content: "Puedes iniciar el trámite desde la banca digital.",
+      sources: [
+        {
+          title: "Canales digitales",
+          category: "Banca digital",
+          url: "https://www.bancognb.com.pe/inicio/canales",
+          verified_at: "2026-11-01T00:00:00Z",
+        },
+      ],
+    },
+  ])("replaces stale institution-specific answers with neutral text", ({ content, sources }) => {
+    expect(getSafeAssistantContent(content, sources)).toEqual({
+      content:
+        "No tengo información verificada para responder esta consulta financiera. Puedo orientarte de forma general o ayudarte a registrar un ticket.",
+      isGenericFallback: true,
+    });
+  });
+
+  it("keeps a general answer and its status when no institution is identified", () => {
+    expect(
+      getSafeAssistantContent("Puedo ayudarte a registrar y seguir un ticket."),
+    ).toEqual({
+      content: "Puedo ayudarte a registrar y seguir un ticket.",
+      isGenericFallback: false,
+    });
   });
 });
 

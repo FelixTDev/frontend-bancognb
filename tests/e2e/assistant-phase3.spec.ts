@@ -312,7 +312,7 @@ async function openAssistant(page: Page, options: MockOptions = {}) {
   const mock = await installMockApi(page, options);
   await page.goto(options.authenticated === false ? "/" : "/app/asistente");
   if (options.authenticated === false) {
-    await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+    await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
   }
   return mock;
 }

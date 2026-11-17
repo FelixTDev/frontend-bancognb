@@ -63,6 +63,7 @@ function reply(
   query: Record<string, unknown> | null = null,
   botContent = "Respuesta estructurada del asistente.",
   id = "assistant-phase2-reply",
+  ui?: Record<string, unknown>,
 ) {
   return {
     user_message: message(`${id}-user`, "USER", "Consulta de prueba"),
@@ -78,6 +79,7 @@ function reply(
     response_source: "DETERMINISTIC",
     sources: [],
     ticket_query: query,
+    ui,
   };
 }
 
@@ -223,7 +225,7 @@ async function openAssistant(page: Page, authenticated = true) {
   const mock = await installMockApi(page, { authenticated });
   await page.goto(authenticated ? "/app/asistente" : "/");
   if (!authenticated) {
-    await page.getByRole("button", { name: "Abrir Asistente GNB" }).click();
+    await page.getByRole("button", { name: "Abrir asistente de atención" }).click();
   }
   return mock;
 }
@@ -347,12 +349,35 @@ test("lista los tickets devueltos y pagina con el mensaje que reconoce el backen
           page_size: 5,
           total_pages: 2,
         },
+      }, "Encontré tus tickets.", "ticket-list-with-options", {
+        type: "MAIN_MENU",
+        menu_id: "ticket-list-context",
+        options: [
+          {
+            id: "query-first-ticket",
+            label: "Consultar el primer ticket",
+            action: "CHECK_TICKET_STATUS",
+          },
+        ],
       });
   });
 
   await sendMessage(page, "Muéstrame mis tickets recientes");
   await expect(page.getByRole("list", { name: "Tickets encontrados" })).toHaveCount(1);
   await expect(page.locator(".assistant-ticket-card")).toHaveCount(5);
+  await expect(
+    page.getByRole("button", { name: "Consultar el primer ticket" }),
+  ).toBeVisible();
+  const resultPrecedesOptions = await page.evaluate(() => {
+    const result = document.querySelector(".assistant-ticket-query");
+    const options = document.querySelector(".assistant-interactive-options");
+    return Boolean(
+      result &&
+        options &&
+        (result.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING),
+    );
+  });
+  expect(resultPrecedesOptions).toBe(true);
   await expect(page.getByText("En proceso").first()).toBeVisible();
   await expect(page.getByText("Media").first()).toBeVisible();
   await expect(page.getByText("Página 1 de 2")).toBeVisible();
@@ -742,7 +767,7 @@ test("presenta temas, FAQ e indicador de respuesta sin desbordar", async ({ page
   });
 
   const mock = await openAssistant(page, false);
-  const panel = page.getByRole("dialog", { name: "Asistente GNB" });
+  const panel = page.getByRole("dialog", { name: "Asistente de atención" });
   await expect(panel.getByRole("heading", { name: "¿Qué necesitas resolver hoy?" })).toBeVisible();
   await expect(panel.getByRole("group", { name: "Temas de atención" }).getByRole("button")).toHaveCount(4);
 

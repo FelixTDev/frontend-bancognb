@@ -6,7 +6,6 @@ import {
   ChevronRight,
   CircleStop,
   CreditCard,
-  ExternalLink,
   Landmark,
   Link2,
   List,
@@ -30,13 +29,13 @@ import {
   api,
   type BotMessageResponse,
   type ChatbotConvertedTicketSummary,
-  type ChatbotSource,
   type ChatbotUI,
   type ChatbotUIOption,
   type ChatMessageCreateInput,
   type Conversation,
 } from "../../shared/api/endpoints";
 import { ApiError } from "../../shared/api/http";
+import { AcademicDisclaimer } from "../../shared/components/academic-disclaimer";
 import { Button, ResponsiveImage } from "../../shared/components/ui";
 import { formatCategoryDisplayName } from "../../shared/ticket-labels";
 import {
@@ -46,7 +45,7 @@ import {
   getAssistantTicketQueryPresentation,
   getAssistantReplyPresentation,
   getAssistantResponseStatus,
-  getSafeAssistantSourceUrl,
+  getSafeAssistantContent,
   getAssistantRequestErrorMessage,
   getAssistantClarificationChoices,
   getAssistantPriorityQuickReplies,
@@ -146,7 +145,7 @@ function AssistantWelcomeMenu({
         <div>
           <h2>¿Qué necesitas resolver hoy?</h2>
           <p>
-            Hola, soy el asistente GNB. Elige un tema o cuéntame qué necesitas.
+            Hola, soy el asistente de atención. Elige un tema o cuéntame qué necesitas.
           </p>
         </div>
       </div>
@@ -311,7 +310,6 @@ interface VisibleMessage {
   readonly content: string;
   readonly sender: "user" | "bot";
   readonly responseStatus?: AssistantResponseStatus;
-  readonly sources?: readonly ChatbotSource[];
 }
 
 interface AssistantConversationProps {
@@ -329,17 +327,22 @@ const toVisibleMessages = (
   (conversation.messages ?? []).map((message) => {
     const sender =
       message.sender_type.toUpperCase() === "USER" ? "user" : "bot";
+    const safeContent =
+      sender === "bot" ? getSafeAssistantContent(message.content) : null;
     return {
       id: message.id,
-      content: redactVisibleMessageIdentifiers(message.content),
+      content: redactVisibleMessageIdentifiers(
+        safeContent?.content ?? message.content,
+      ),
       sender,
       responseStatus:
         sender === "bot"
-          ? getAssistantResponseStatus({
-              response_source: message.response_source,
-            })
+          ? safeContent?.isGenericFallback
+            ? "fallback"
+            : getAssistantResponseStatus({
+                response_source: message.response_source,
+              })
           : null,
-      sources: [],
     };
   });
 
@@ -371,17 +374,6 @@ const errorDetails = (
     message: getAssistantRequestErrorMessage(-1, context, undefined, authenticated),
     requestId: null,
   };
-};
-
-const sourceVerificationLabel = (verifiedAt: string | null | undefined) => {
-  if (!verifiedAt) return null;
-  const date = new Date(verifiedAt);
-  if (Number.isNaN(date.getTime())) return null;
-  const formatted = new Intl.DateTimeFormat("es-PE", {
-    dateStyle: "medium",
-    timeZone: "UTC",
-  }).format(date);
-  return `Verificada el ${formatted}`;
 };
 
 const formatAssistantDate = (value: string): string => {
@@ -907,14 +899,19 @@ export function AssistantConversation({
         ui: response.ui ?? null,
       });
       setConversionConflict(false);
+      const safeContent = getSafeAssistantContent(
+        response.bot_message.content,
+        response.sources ?? [],
+      );
       setMessages((current) => [
         ...current,
         {
           id: response.bot_message.id,
-          content: redactVisibleMessageIdentifiers(response.bot_message.content),
+          content: redactVisibleMessageIdentifiers(safeContent.content),
           sender: "bot",
-          responseStatus: getAssistantResponseStatus(response),
-          sources: response.sources ?? [],
+          responseStatus: safeContent.isGenericFallback
+            ? "fallback"
+            : getAssistantResponseStatus(response),
         },
       ]);
       setLastReply(response);
@@ -1363,7 +1360,7 @@ export function AssistantConversation({
           <Bot />
         </span>
         <div>
-          <strong>Asistente GNB</strong>
+          <strong>Asistente de atención</strong>
           <small>
             {chat.isPending
               ? "Preparando una respuesta…"
@@ -1388,6 +1385,8 @@ export function AssistantConversation({
           <span className="assistant-panel__reset-label">Reiniciar</span>
         </Button>
       </header>
+
+      <AcademicDisclaimer className="assistant-academic-disclaimer" />
 
       {conversation && !terminalConversation ? (
         <div
@@ -1456,77 +1455,32 @@ export function AssistantConversation({
                       ? formatAssistantMessage(message.content)
                       : message.content}
                   </p>
-                  {message.sender === "bot" &&
-                  (message.responseStatus || message.sources?.length) ? (
+                  {message.sender === "bot" && message.responseStatus ? (
                     <div className="assistant-message__details">
-                      {message.responseStatus ? (
-                        <div
-                          className="assistant-response-status"
-                          role="status"
-                        >
-                          {message.responseStatus === "ai"
-                            ? "Respuesta generada con IA."
-                            : "Respuesta de respaldo. No se pudo validar una respuesta de IA."}
-                        </div>
-                      ) : null}
-                      {message.sources?.length ? (
-                        <details className="assistant-sources">
-                          <summary>
-                            {message.sources.length === 1
-                              ? "Ver fuente"
-                              : "Ver fuentes"}
-                            <ChevronDown aria-hidden="true" />
-                          </summary>
-                          <ul>
-                            {message.sources.map((source, index) => {
-                              const href = getSafeAssistantSourceUrl(source.url);
-                              const verifiedAt = sourceVerificationLabel(
-                                source.verified_at,
-                              );
-                              return (
-                                <li
-                                  key={`${source.title}-${source.url ?? "source"}-${index}`}
-                                >
-                                  <div className="assistant-source__details">
-                                    <div className="assistant-source__heading">
-                                      {href ? (
-                                        <a
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                        >
-                                          <span>{source.title}</span>
-                                          <ExternalLink aria-hidden="true" />
-                                          <span className="sr-only">
-                                            {" "}(abre en una pestaña nueva)
-                                          </span>
-                                        </a>
-                                      ) : (
-                                        <strong>{source.title}</strong>
-                                      )}
-                                      {source.category ? (
-                                        <span className="assistant-source__category">
-                                          {formatCategoryDisplayName(source.category)}
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                    {href ? (
-                                      <span className="assistant-source__url">
-                                        {href}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  {verifiedAt ? <small>{verifiedAt}</small> : null}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </details>
-                      ) : null}
+                      <div className="assistant-response-status" role="status">
+                        {message.responseStatus === "ai"
+                          ? "Respuesta generada con IA."
+                          : "Respuesta de respaldo. No se pudo validar una respuesta de IA."}
+                      </div>
                     </div>
                   ) : null}
                   {isLatestReply ? (
                     <div className="assistant-message__details">
+                      {ticketQueryPresentation ? (
+                        <AssistantTicketQueryResult
+                          key={lastReply?.bot_message.id}
+                          presentation={ticketQueryPresentation}
+                          disabled={isRestoring || chat.isPending}
+                          onRequestPage={(page) =>
+                            submit(`Muéstrame mis tickets recientes página ${page}`)
+                          }
+                          onSubmitTicketCode={(code) =>
+                            submit(code, true, "ticket-code")
+                          }
+                          ticketCodePrompt={ticketCodePrompt}
+                        />
+                      ) : null}
+
                       {showInlineClarification ? (
                         <div className="assistant-clarification">
                           <strong>
@@ -1557,21 +1511,6 @@ export function AssistantConversation({
                       ) : null}
 
                       {renderTicketDraft()}
-
-                      {ticketQueryPresentation ? (
-                        <AssistantTicketQueryResult
-                          key={lastReply?.bot_message.id}
-                          presentation={ticketQueryPresentation}
-                          disabled={isRestoring || chat.isPending}
-                          onRequestPage={(page) =>
-                            submit(`Muéstrame mis tickets recientes página ${page}`)
-                          }
-                          onSubmitTicketCode={(code) =>
-                            submit(code, true, "ticket-code")
-                          }
-                          ticketCodePrompt={ticketCodePrompt}
-                        />
-                      ) : null}
 
                       {conversation &&
                       lastReply &&
